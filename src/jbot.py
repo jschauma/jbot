@@ -48,7 +48,7 @@ TWITTER_RESPONSE_STATUS = {
     }
 
 NEW = [
-        "I now also have #tigerblood, know some Crypto and various factlets."
+        "I know all about Mr.T, Vin Diesel and Chuck Norris. And of course your mom."
     ]
 
 ###
@@ -100,6 +100,21 @@ def cmd_feature(msg):
         print txt
 
     return "@%s Feature request relayed to my owner. Thank you!" % msg.user.screen_name
+
+
+def cmd_factlet(msg, url):
+    """Get a factlet about a certain personality."""
+
+    pattern = re.compile('.*<summary>(?P<fact>.*)</summary>', re.I)
+    try:
+        for line in urllib2.urlopen(url).readlines():
+            match = pattern.match(line)
+            if match:
+                return match.group('fact')
+
+        sys.stderr.write("Tried to get a fact from %s but found nothing." % url)
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
 
 def cmd_help(msg):
@@ -235,6 +250,22 @@ def cmd_tool(msg):
     if match:
         tool = match.group('tool')
         return "You're a tool, @%s." % tool
+
+
+def cmd_yourmom(msg, url):
+    """Generate a yo-momma joke."""
+
+    url = "%s/ym%02d.html" % (url, random.randint(1,28))
+    pattern = re.compile('(?P<yomomma>.*)<br><br>', re.I)
+    try:
+        for line in urllib2.urlopen(url).readlines():
+            match = pattern.match(line)
+            if match:
+                return match.group('yomomma')
+
+        sys.stderr.write("Tried to get a yo momma joke from %s but found nothing." % url)
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
 
 ###
@@ -379,6 +410,26 @@ COUNTDOWNS = {
         "turkey" : time.mktime(time.strptime("2012-11-24 16:00:00", "%Y-%m-%d %H:%M:%S")),
         "worldcup" : time.mktime(time.strptime("2014-06-13 00:00:00", "%Y-%m-%d %H:%M:%S"))
     }
+
+# If we have a new follower, pick one of these. %user will be replaced
+# with the username.
+GREETINGS = [
+        "Hello %user! I look forward to brightening your day!",
+        "I sincerely welcome %user to the list of jbotters.",
+        "Yo yo yo, ma homie %user in da house!",
+        "Look at that, %user found me! Hooray!",
+        "Good day, %user. I hope you will find my services to your liking."
+    ]
+
+# If we stop following somebody, pick one of these. %user will be replaced
+# with the username.
+GOODBYES = [
+        "Awww. I'm sad to see you leave, %user. Farewell!",
+        "Ooops, I guess I shouldn't have said that about %user.",
+        "Smell ya later, %user. (I still can't believe 'Smell ya' later' replaced 'Goodbye'...)",
+        "Goodbye, %user. It was nice following you.",
+        "It's a sad day - we've lost %user. Oh well, more jbot for the rest of you."
+    ]
 
 ##
 ## Regex trigger fall into a number of categories:
@@ -555,7 +606,16 @@ REGEX_STR_TRIGGER = {
                 "I really like the vest."
             ],
         # Vikings
-        re.compile("viking", re.I) : "Spam, lovely Spam, wonderful Spam."
+        re.compile("viking", re.I) : "Spam, lovely Spam, wonderful Spam.",
+        # Monkeys
+        re.compile("(monkey|orangutan|gorilla|macaque|chimp|\bape\blemur|simian|primate)", re.I) : [
+                "Bababooey bababooey bababooey!",
+                "Fafa Fooey.",
+                "Mama Monkey.",
+                "Fla Fla Flo Fly.",
+                "Fafa Fooey.",
+                "FaFa Fo Hi."
+            ]
     }
 
 # Map a regex to a URL function - URL tuple
@@ -567,7 +627,15 @@ REGEX_URL_TRIGGER = {
         re.compile(".*(trivia|factual|factlet)", re.I) :
                         ( cmd_trivia, "http://www.nicefacts.com/quickfacts/index.php" ),
         re.compile("(shakespear|hamlet|macbeth|romeo and juliet|merchant of venice|midsummer nicht's dream|henry V|as you like it|All's Well That Ends Well|Comedy of Errors|Cymbeline|Love's Labours Lost|Measure for Measure|Merry Wives of Windsor|Much Ado About Nothing|Pericles|Prince of Tyre|Taming of the Shrew|Tempest|Troilus|Cressida|Twelfth Night|two gentleman of verona|Winter's tale|henry IV|king john|richard II|antony and cleopatra|coriolanus|julius caesar|kind lear|othello|timon of athens|titus|andronicus)", re.I) :
-                        ( cmd_shakespear, "http://www.pangloss.com/seidel/Shaker/index.html" )
+                        ( cmd_shakespear, "http://www.pangloss.com/seidel/Shaker/index.html" ),
+        re.compile("(chuck|norris|walker|texas ranger|karate)", re.I) :
+                        ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=chuck" ),
+        re.compile("(a-?team|mr(\.? )?t|hannibal|murdock|Baracus)", re.I) :
+                        ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=mrt" ),
+        re.compile("(\bvin\b|diesel|fast and (the )?furious|riddick)", re.I) :
+                        ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=vin" ),
+        re.compile("(ur([ _])mom|yourmom|m[oa]mma|[^ ]+'s mom)", re.I) :
+                        ( cmd_yourmom, "http://www.ahajokes.com" )
     }
 
 ###
@@ -682,7 +750,7 @@ class Jbot(object):
 
             wanted.sort()
         except tweepy.error.TweepError, e:
-            self.handleTweepError(e, "Unable to get list of % for %s" % (what, user))
+            self.handleTweepError(e, "Unable to get list of %s for %s" % (what, user))
 
         return wanted
 
@@ -747,7 +815,6 @@ class Jbot(object):
         errmsg = ""
 
         rate_limit = self.api.rate_limit_status()
-        diff = rate_limit["reset_time_in_seconds"] - time.time()
 
         if tweeperr and tweeperr.response.status:
             if tweeperr.response.status == TWITTER_RESPONSE_STATUS["FailWhale"]:
@@ -756,8 +823,18 @@ class Jbot(object):
                 errmsg = "Twitter is busted again: %s\n" % time.asctime()
             elif tweeperr.response.status == TWITTER_RESPONSE_STATUS["RateLimited"]:
                 errmsg = "Fully rate limited until %s.\n" % rate_limit["reset_time"]
+                diff = rate_limit["reset_time_in_seconds"] - time.time()
+                sys.stderr.write("Hits left: %d\n" % rate_limit["remaining_hists"])
+                if diff > 3500:
+                    sys.stderr.write("%d\n%s\n" % (diff,str(rate_limit)))
+                    sys.exit(EXIT_ERROR)
             elif tweeperr.response.status == TWITTER_RESPONSE_STATUS["SearchRateLimited"]:
                 errmsg = "SearchRate limited until %s.\n" % rate_limit["reset_time"]
+                diff = rate_limit["reset_time_in_seconds"] - time.time()
+                sys.stderr.write("Hits left: %d\n" % rate_limit["remaining_hists"])
+                if diff > 3500:
+                    sys.stderr.write("%d\n%s\n" % (diff,str(rate_limit)))
+                    sys.exit(EXIT_ERROR)
             else:
                 errmsg = "On %s Twitter told me:\n'%s'\n" % (time.asctime(), tweeperr)
 
@@ -776,12 +853,14 @@ class Jbot(object):
             self.verbose("Now %sing %s...", u)
             try:
                 if action == "follow":
+                    reply = GREETINGS[random.randint(0,len(GREETINGS)-1)]
+                    reply = re.sub(r'%user', u, reply)
+                    self.tweet(reply)
                     self.api.create_friendship(screen_name=u)
-                    #self.tweet("@%s Hello! I look forward to brightening your day!" % u)
-                    sys.stderr.write("@%s Hello! I look forward to brightening your day!" % u)
                 elif action == "unfollow":
-                    #self.tweet("@%s Awwww.  Goodbye..." % u)
-                    sys.stderr.write("@%s Awwww.  Goodbye..." % u)
+                    reply = GOODBYES[random.randint(0,len(GOODBYES)-1)]
+                    reply = re.sub(r'%user', u, reply)
+                    self.tweet(reply)
                     self.api.destroy_friendship(screen_name=u)
                 else:
                     sys.stderr.write("Illegal action for 'followOrUnfollow': %s\n" % action)
@@ -880,17 +959,14 @@ class Jbot(object):
             results = self.api.mentions(since_id=self.lastmessage)
             for msg in results:
                 if not self.processMessage(msg):
-                    pattern = re.compile('^@%s .*' % self.getOpt("user"))
-                    match = pattern.match(msg.text)
-                    if match:
-                        # XXX: this needs to go into a function somewhere else
-                        # instead of being crammed in here
-                        ip = re.compile("(damm?n? you|shut ?up|die|(cram|stuff) it|piss ?off|(fuck|screw|hate) you|stupid|you (stink|blow)|go to hell|stfu|idiot|(you are|is) annoying|down boy)", re.I)
-                        m = ip.match(msg.text)
-                        if m:
-                            self.tweet(cmd_insult("!insult %s" % msg.user.screen_name))
-                        else:
-                            self.tweet("@%s %s" % (msg.user.screen_name,
+                    # XXX: this needs to go into a function somewhere else
+                    # instead of being crammed in here
+                    ip = re.compile("(damm?n? you|shut ?up|die|(cram|stuff) it|piss ?off|(fuck|screw|hate) you|stupid|you (stink|blow)|go to hell|stfu|idiot|(you are|is) annoying|down boy)", re.I)
+                    m = ip.match(msg.text)
+                    if m:
+                        self.tweet(cmd_insult("!insult %s" % msg.user.screen_name))
+                    else:
+                        self.tweet("@%s %s" % (msg.user.screen_name,
                                         MISC_RESPONSES[random.randint(0,len(MISC_RESPONSES)-1)]))
         except tweepy.error.TweepError, e:
             self.handleTweepError(e, "API mentions error for myself.")
