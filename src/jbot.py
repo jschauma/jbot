@@ -268,6 +268,20 @@ def cmd_yourmom(msg, url):
         sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
 
+def randomLineFromUrl(msg, url):
+    """Get a random line from a given URL.
+
+    'msg' is accepted for compatibilty with function calls."""
+
+    try:
+        lines = urllib2.urlopen(url).readlines()
+        return "%s" % lines[random.randint(0,len(lines)-1)]
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+
+
+
 ###
 ### Classes
 ###
@@ -635,7 +649,11 @@ REGEX_URL_TRIGGER = {
         re.compile("(\bvin\b|diesel|fast and (the )?furious|riddick)", re.I) :
                         ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=vin" ),
         re.compile("(ur([ _])mom|yourmom|m[oa]mma|[^ ]+'s mom)", re.I) :
-                        ( cmd_yourmom, "http://www.ahajokes.com" )
+                        ( cmd_yourmom, "http://www.ahajokes.com" ),
+        re.compile("(bug|bee|insect|fly|roach|spider|grasshopper)", re.I) :
+                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/bugs" ),
+        re.compile("(animal|cat|dog|horse|bird|mammal|cow|chicken|lobster|bear)", re.I) :
+                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/animals" )
     }
 
 ###
@@ -716,7 +734,7 @@ class Jbot(object):
 
         wanted = []
 
-        self.verbose("Getting %s of '%s'." % (what, user), 2)
+        self.verbose("Getting %s of '%s'." % (what, user), 3)
         if what == "followers":
             func = self.api.followers
         elif what == "friends":
@@ -741,11 +759,11 @@ class Jbot(object):
             for page in tweepy.Cursor(func).pages():
                 wanted.extend([ str(u.screen_name) for u in page ])
                 self.verbose("Found %d users (%d in total) from page #%d." % \
-                                (len(page), len(wanted), num), 3)
+                                (len(page), len(wanted), num), 4)
                 num = num + 1
                 if (num > threshold):
                     self.verbose("Reached my limit of %d users in %d pages. Sorry." % \
-                                    (len(wanted), num), 3)
+                                    (len(wanted), num), 4)
                     break
 
             wanted.sort()
@@ -776,7 +794,7 @@ class Jbot(object):
         This also attempts to get a lock on the file to prevent
         simultaneous instances from running."""
 
-        self.verbose("Trying to get the last processed message...")
+        self.verbose("Trying to get the last processed message...", 2)
         try:
             self.lmfd = file(self.lmfile, "r+")
             fcntl.flock(self.lmfd.fileno(), fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -787,21 +805,21 @@ class Jbot(object):
             # We explicitly do not close the file here; we want to keep
             # the lock on the fd while we're running.
         except IOError, e:
-            sys.stderr.write("Unable to open and lock file '%s': %s\n" % \
+            self.verbose("Unable to open and lock file '%s': %s\n" % \
                                 (self.lmfile, e.strerror))
             sys.exit(EXIT_ERROR)
 
-        self.verbose("Last message processed: %s" % self.lastmessage, 2)
+        self.verbose("Last message processed: %s" % self.lastmessage, 3)
 
         try:
-            self.verbose("Determining my own last message...", 2)
+            self.verbose("Determining my own last message...", 3)
             results = self.api.user_timeline(count=1)
             if results:
                 mylast = results[0].id
                 if (mylast > self.lastmessage):
                     self.lastmessage = results[0].id
             else:
-                sys.stderr.write("Unable to find my own last message!\n")
+                self.verbose("Unable to find my own last message!\n")
                 sys.exit(EXIT_ERROR)
         except tweepy.error.TweepError, e:
             self.handleTweepError(e, "API user_timeline error for %s" % self.getOpt("user"))
@@ -814,43 +832,46 @@ class Jbot(object):
         diff = 0
         errmsg = ""
 
-        rate_limit = self.api.rate_limit_status()
+        try:
+            rate_limit = self.api.rate_limit_status()
+        except tweepy.error.TweepError, e:
+            # Hey now, look at that, we can failwahle on getting the api
+            # status. Neat, huh? Let's pretend that didn't happen and move
+            # on, why not.
+            return
 
         if tweeperr and tweeperr.response.status:
             if tweeperr.response.status == TWITTER_RESPONSE_STATUS["FailWhale"]:
-                errmsg = "Twitter #FailWhale'd on me on %s.\n" % time.asctime()
+                errmsg = "Twitter #FailWhale'd on me on %s." % time.asctime()
             elif tweeperr.response.status == TWITTER_RESPONSE_STATUS["Broken"]:
-                errmsg = "Twitter is busted again: %s\n" % time.asctime()
-            elif tweeperr.response.status == TWITTER_RESPONSE_STATUS["RateLimited"]:
-                errmsg = "Fully rate limited until %s.\n" % rate_limit["reset_time"]
+                errmsg = "Twitter is busted again: %s" % time.asctime()
+            elif tweeperr.response.status == TWITTER_RESPONSE_STATUS["RateLimited"] or \
+                 tweeperr.response.status == TWITTER_RESPONSE_STATUS["SearchRateLimited"]:
+                errmsg = "Rate limited until %s." % rate_limit["reset_time"]
                 diff = rate_limit["reset_time_in_seconds"] - time.time()
-                sys.stderr.write("Hits left: %d\n" % rate_limit["remaining_hists"])
-                if diff > 3500:
-                    sys.stderr.write("%d\n%s\n" % (diff,str(rate_limit)))
-                    sys.exit(EXIT_ERROR)
-            elif tweeperr.response.status == TWITTER_RESPONSE_STATUS["SearchRateLimited"]:
-                errmsg = "SearchRate limited until %s.\n" % rate_limit["reset_time"]
-                diff = rate_limit["reset_time_in_seconds"] - time.time()
-                sys.stderr.write("Hits left: %d\n" % rate_limit["remaining_hists"])
-                if diff > 3500:
-                    sys.stderr.write("%d\n%s\n" % (diff,str(rate_limit)))
-                    sys.exit(EXIT_ERROR)
+                if rate_limit["remaining_hits"] > 0:
+                    # False alarm?  We occasionally seem to hit a race
+                    # condition where one call falls directly onto the
+                    # reset time, so we appear to be throttled for 59:59
+                    # minutes, but actually aren't.  Let's pretend that
+                    # didn't happen.
+                    return
             else:
-                errmsg = "On %s Twitter told me:\n'%s'\n" % (time.asctime(), tweeperr)
+                errmsg = "On %s Twitter told me:\n'%s'" % (time.asctime(), tweeperr)
 
-        sys.stderr.write(info + "\n" + errmsg)
+        self.verbose(info + "\n" + errmsg)
 
         if diff:
-            sys.stderr.write("Sleeping for %d seconds...\n" % diff)
+            self.verbose("Sleeping for %d seconds..." % diff)
             time.sleep(diff)
 
 
     def followOrUnfollow(self, action, users):
         """Start to follow the given list of users."""
 
-        self.verbose("Now %sing: %s" % (action, ",".join(users)), 2)
+        self.verbose("Now %sing: %s" % (action, ",".join(users)), 3)
         for u in users:
-            self.verbose("Now %sing %s...", u)
+            self.verbose("Now %sing %s..." % (action, u), 2)
             try:
                 if action == "follow":
                     reply = GREETINGS[random.randint(0,len(GREETINGS)-1)]
@@ -954,7 +975,7 @@ class Jbot(object):
         the last time the bot ran) and process them accordingly.
         """
 
-        self.verbose("Processing at-messages...")
+        self.verbose("Processing at-messages...", 2)
         try:
             results = self.api.mentions(since_id=self.lastmessage)
             for msg in results:
@@ -984,7 +1005,7 @@ class Jbot(object):
         if match:
             response = ""
             command = match.group('command')
-            self.verbose("Found command %s..." % command, 4)
+            self.verbose("Found command %s..." % command, 5)
             try:
                 cmd = COMMANDS[command]
                 response = cmd.run(msg)
@@ -1007,7 +1028,7 @@ class Jbot(object):
 
         Returns true if it found anything, false otherwise."""
 
-        self.verbose("Processing func regexes in %d from %s..." % (msg.id, msg.user.screen_name), 5)
+        self.verbose("Processing func regexes in %d from %s..." % (msg.id, msg.user.screen_name), 6)
         txt = msg.text
         for pattern in REGEX_FUNC_TRIGGER.keys():
             match = pattern.search(txt)
@@ -1034,9 +1055,9 @@ class Jbot(object):
         accordingly.
         """
 
-        self.verbose("Processing all of my followers messages...")
+        self.verbose("Processing all of my followers messages...", 2)
         for friend in self.friends:
-            self.verbose("Processing messages from %s (newer than %s)..." % (friend, self.lastmessage), 2)
+            self.verbose("Processing messages from %s (newer than %s)..." % (friend, self.lastmessage), 3)
             try:
                 results = self.api.user_timeline(screen_name=friend,since_id=self.lastmessage)
                 for msg in results:
@@ -1058,12 +1079,12 @@ class Jbot(object):
 
         if self.seen.has_key(msg.id):
             self.verbose("Skipping message %d from %s (already seen)..." % \
-                            (msg.id, msg.user.screen_name), 3)
+                            (msg.id, msg.user.screen_name), 4)
             return True
 
         self.seen[msg.id] = 1
 
-        self.verbose("Processing message %d from %s..." % (msg.id, msg.user.screen_name), 3)
+        self.verbose("Processing message %d from %s..." % (msg.id, msg.user.screen_name), 4)
         if self.processCommands(msg):
             return True
 
@@ -1078,7 +1099,7 @@ class Jbot(object):
 
         Returns true if it found any, false otherwise."""
 
-        self.verbose("Processing regexes in %d from %s..." % (msg.id, msg.user.screen_name), 4)
+        self.verbose("Processing regexes in %d from %s..." % (msg.id, msg.user.screen_name), 5)
 
         if self.processStrTrigger(msg):
             return True
@@ -1098,7 +1119,7 @@ class Jbot(object):
 
         Returns true if it found anything, false otherwise."""
 
-        self.verbose("Processing str regexes in %d from %s..." % (msg.id, msg.user.screen_name), 5)
+        self.verbose("Processing str regexes in %d from %s..." % (msg.id, msg.user.screen_name), 6)
         txt = msg.text
         for pattern in REGEX_STR_TRIGGER.keys():
             match = pattern.search(txt)
@@ -1121,7 +1142,7 @@ class Jbot(object):
 
         Returns true if it found anything, false otherwise."""
 
-        self.verbose("Processing url regexes in %d from %s..." % (msg.id, msg.user.screen_name), 5)
+        self.verbose("Processing url regexes in %d from %s..." % (msg.id, msg.user.screen_name), 6)
         txt = msg.text
         for pattern in REGEX_URL_TRIGGER.keys():
             match = pattern.search(txt)
@@ -1162,7 +1183,7 @@ class Jbot(object):
         If the message is too long, it will be truncated.
         """
 
-        self.verbose("Tweeting: %s" % msg, 2)
+        self.verbose("Tweeting: %s" % msg, 3)
 
         if len(msg) > MAXCHARS:
             msg = ' '.join(msg[:136].split(' ')[0:-1]) + '...'
@@ -1177,14 +1198,14 @@ class Jbot(object):
         """Find people following this bot and follow them, stop following
         those that stopped following us."""
 
-        self.verbose("Updating followship...")
+        self.verbose("Updating followship...", 2)
         user = self.getOpt("user")
         self.followers = self.getList("followers", user)
         self.friends = self.getList("friends", user)
 
         if not self.friends or (len(self.friends) == 0) or \
             not self.followers or (len(self.followers) == 0):
-            sys.stderr.write("Failed to get followship. Pretending nothing changed.")
+            self.verbose("Failed to get followship. Pretending nothing changed.\n")
             return
 
         new_followers = list(set.difference(set(self.followers), set(self.friends)))
@@ -1216,7 +1237,7 @@ class Jbot(object):
             msgs.sort()
             self.lastmessage = msgs.pop()
 
-        self.verbose("Updating last-run timestamp...")
+        self.verbose("Updating last-run timestamp...", 2)
         try:
             # We still have an open file handle with a lock from when we
             # read our last message, so just rewind, write and then close
