@@ -1,4 +1,4 @@
-.Dd March 14, 2011
+.Dd March 29, 2011
 .Dt JBOT 1
 .Os
 .Sh NAME
@@ -6,7 +6,7 @@
 .Nd just a bunch of tweets (a twitter bot)
 .Sh SYNOPSIS
 .Nm
-.Op Fl hv
+.Op Fl dhv
 .Op Fl u Ar user
 .Sh DESCRIPTION
 .Nm
@@ -20,6 +20,9 @@ user account (or the default account '@realjbot').
 The following options are supported by
 .Nm :
 .Bl -tag -width u_user_
+.It Fl d
+Enable debugging.
+Any messages generated will be printed to STDERR instead of being tweeted.
 .It Fl h
 Print a short usage statement and exit.
 .It Fl u Ar user

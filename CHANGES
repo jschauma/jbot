@@ -1,4 +1,13 @@
 
+2011-03-31:
+ * add a debugging flag to facilitate... debugging
+ * add support for and implement various daily calls
+ * add a URL shortener
+ * try to avoid encoding errors by attempting to use unicode where
+   necessary
+ * additional responses to unmatched at-messages
+ * include reply-to messages ids in conversational tweets
+
 2011-03-23:
  * insects and other animals
  * suppress error messages unless verbose

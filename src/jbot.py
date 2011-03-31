@@ -32,6 +32,8 @@ BOTOWNER = "jschauma"
 
 MAXCHARS = 140
 
+URL_SHORTENER = "http://is.gd/api.php?longurl="
+
 # http://apiwiki.twitter.com/w/page/22554652/HTTP-Response-Codes-and-Errors
 TWITTER_RESPONSE_STATUS = {
         "OK" : 200,
@@ -48,12 +50,61 @@ TWITTER_RESPONSE_STATUS = {
     }
 
 NEW = [
-        "I know all about Mr.T, Vin Diesel and Chuck Norris. And of course your mom."
+        "Daily News 'n stuff!",
+        "Better (?) responses."
     ]
 
 ###
 ### Command methods
 ###
+
+def beerOfTheDay(msg=None, link=None):
+    """Get the beer of the day.
+
+    Arguments given are ignored; provided for compatibility with other
+    callbacks."""
+
+    beer_pattern = re.compile('.*<center><font class="title">(?P<beer>.*)</font>', re.I)
+    category_pattern = re.compile('.*alt="Category" src="/images/category.gif"></td><td class="info_right">(?P<category>.*)</td>', re.I)
+    location_pattern = re.compile('.*alt="Location" src="/images/location.gif"></td><td class="info_right">(?P<location>.*)</td>', re.I)
+
+    next = False
+    beer = ""
+    category = ""
+    location = ""
+    description = ""
+    msg = ""
+
+    (url, unused) = DAILIES["beer"]
+    try:
+        for line in urllib2.urlopen(url).readlines():
+            match = beer_pattern.match(line)
+            if match:
+                found = True
+                beer = match.group('beer')
+
+            match = category_pattern.match(line)
+            if match:
+                category = match.group('category')
+                continue
+
+            match = location_pattern.match(line)
+            if match:
+                location = match.group('location')
+                next = True
+                continue
+
+            if next:
+                description = dehtmlify(line)
+                break
+
+
+        msg = "#BeerOfTheDay %s (%s, %s) %s : %s" % (beer, category, location, shorten(url), description.strip())
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+    return msg
+
 
 def cmd_charliesheen(msg, url):
     """Get a quote from Charlie Sheen."""
@@ -63,7 +114,7 @@ def cmd_charliesheen(msg, url):
         for line in urllib2.urlopen(url).readlines():
             match = pattern.match(line)
             if match:
-                return match.group('quote')
+                return u"@%s %s" % (msg.user.screen_name, match.group('quote'))
 
         sys.stderr.write("Tried to get a quote from %s but found nothing." % url)
     except urllib2.URLError, e:
@@ -81,9 +132,9 @@ def cmd_countdown(msg):
         if COUNTDOWNS.has_key(what):
             t1 = time.mktime(time.localtime())
             t2 = COUNTDOWNS[what]
-            return "@%s %s" % (msg.user.screen_name, datetime.timedelta(seconds=t2-t1))
+            return u"@%s %s" % (msg.user.screen_name, datetime.timedelta(seconds=t2-t1))
 
-    return "%s" % DONTKNOW[random.randint(0,len(DONTKNOW)-1)]
+    return u"%s" % DONTKNOW[random.randint(0,len(DONTKNOW)-1)]
 
 
 def cmd_feature(msg):
@@ -99,7 +150,7 @@ def cmd_feature(msg):
     if match:
         print txt
 
-    return "@%s Feature request relayed to my owner. Thank you!" % msg.user.screen_name
+    return u"@%s Feature request relayed to my owner. Thank you!" % msg.user.screen_name
 
 
 def cmd_factlet(msg, url):
@@ -127,7 +178,7 @@ def cmd_help(msg):
         command = match.group('command')
         try:
             cmd = COMMANDS[command]
-            return "@%s %s" % (msg.user.screen_name, cmd.getHelp())
+            return u"@%s %s" % (msg.user.screen_name, cmd.getHelp())
         except KeyError:
             return cmd_none(msg, command)
 
@@ -136,7 +187,7 @@ def cmd_help(msg):
     if match:
         return JBOT_HELP_URL
 
-    return "@%s I know of %d commands. Ask me about one of them or see: %s" % \
+    return u"@%s I know of %d commands. Ask me about one of them or see: %s" % \
                 (msg.user.screen_name, len(COMMANDS), JBOT_HELP_URL)
 
 
@@ -149,14 +200,14 @@ def cmd_how(msg):
     if match:
         command = match.group('command')
         if command == BOTNAME:
-            return "@%s Unfortunately, no one can be told what %s is... You have to see it for yourself." % (msg.user.screen_name, BOTNAME)
+            return u"@%s Unfortunately, no one can be told what %s is... You have to see it for yourself." % (msg.user.screen_name, BOTNAME)
         try:
             cmd = COMMANDS[command]
-            return "@%s %s" % (msg.user.screen_name, cmd.how)
+            return u"@%s %s" % (msg.user.screen_name, cmd.how)
         except KeyError:
             pass
 
-    return "@%s %s" % (msg.user.screen_name, DONTKNOW[random.randint(0,len(DONTKNOW)-1)])
+    return u"@%s %s" % (msg.user.screen_name, DONTKNOW[random.randint(0,len(DONTKNOW)-1)])
 
 
 def cmd_insult(msg, url):
@@ -174,7 +225,7 @@ def cmd_insult(msg, url):
             for line in urllib2.urlopen(url).readlines():
                 m = ip.match(line)
                 if m:
-                    return "@%s %s" % (loser, m.group('insult'))
+                    return u"@%s %s" % (loser, m.group('insult'))
         except urllib2.URLError, e:
             sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
@@ -186,13 +237,13 @@ def cmd_insult(msg, url):
 def cmd_new(msg):
     """Explain what's new."""
 
-    return "@%s %s" % (msg.user.screen_name, ",".join(NEW))
+    return u"@%s %s" % (msg.user.screen_name, ",".join(NEW))
 
 
 def cmd_none(msg, command):
     """Dummy command to return a "no such command" message."""
 
-    return "@%s No such command: %s. Try !help or see: %s" % \
+    return u"@%s No such command: %s. Try !help or see: %s" % \
                 (msg.user.screen_name, command, JBOT_HELP_URL)
 
 
@@ -249,7 +300,7 @@ def cmd_tool(msg):
     match = pattern.match(txt)
     if match:
         tool = match.group('tool')
-        return "You're a tool, @%s." % tool
+        return u"You're a tool, @%s." % tool
 
 
 def cmd_yourmom(msg, url):
@@ -268,6 +319,50 @@ def cmd_yourmom(msg, url):
         sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
 
+def dehtmlify(msg):
+    """Strip HTML tags and replace entities in the message."""
+
+    p = re.compile(r'<.*?>')
+    return p.sub('', msg)
+
+
+def onThisDay(msg=None, link=None):
+    """Show what happened today.
+
+    Arguments given are ignored; provided for compatibility with other
+    callbacks."""
+
+    today = time.strftime("%B-%d").lower()
+
+    event_pattern = re.compile('.*<p><!-- start top -->(?P<event>.*)', re.I)
+    link_pattern = re.compile('.*<p><a class="inTextRefer" href="(?P<link>.*)">Go to article', re.I)
+
+    result = ""
+
+    (url, unused) = DAILIES["onthisday"]
+    url = "%s%s/" % (url, today)
+    try:
+        for line in urllib2.urlopen(url).readlines():
+            match = event_pattern.match(line)
+            if match:
+                result = dehtmlify(match.group('event')).strip()
+                continue
+
+            match = link_pattern.match(line)
+            if match:
+                url = match.group('link')
+                break
+
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+    if result:
+        return "#OnThisDay: %s %s" % (shorten(url), result)
+    else:
+        sys.stderr.write("Unable to get even of the day.\n")
+        return result
+
+
 def randomLineFromUrl(msg, url):
     """Get a random line from a given URL.
 
@@ -275,11 +370,158 @@ def randomLineFromUrl(msg, url):
 
     try:
         lines = urllib2.urlopen(url).readlines()
-        return "%s" % lines[random.randint(0,len(lines)-1)]
+        return u"%s" % lines[random.randint(0,len(lines)-1)].strip()
     except urllib2.URLError, e:
         sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
 
+def randomWikipedia(msg=None, link=None):
+    """Get the first line of a random Wikipedia page.
+
+    Arguments given are ignored; provided for compatibility with other
+    callbacks."""
+
+    title_pattern = re.compile(".*<title>(?P<title>.*) - Wikipedia", re.I)
+    line_pattern = re.compile("\s*<p>(?P<text>.*)", re.I)
+
+    (wikiurl, unused) = DAILIES["wikipedia"]
+    first_line = ""
+    title = ""
+    msg = ""
+
+    opener = urllib2.build_opener()
+    opener.addheaders = [('User-agent', 'Mozilla/5.0')]
+    try:
+        url = opener.open(wikiurl)
+        for line in url.readlines():
+            match = title_pattern.match(line)
+            if match:
+                title = match.group('title')
+                continue
+
+            match = line_pattern.match(line)
+            if match:
+                first_line = dehtmlify(match.group('text'))
+                break
+
+        msg = "%s: %s %s" % (title, shorten(url.geturl()), first_line)
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (wikiurl, e))
+
+    return msg
+
+
+def recipeOfTheDay(msg=None, link=None):
+    """Get the first recipe from the Recipie daily.
+
+    Arguments given are ignored; provided for compatibility with other
+    callbacks."""
+
+    start_pattern = re.compile(".*<item>", re.I)
+    title_pattern = re.compile(".*<title>(?P<title>.*)</title>", re.I)
+    link_pattern = re.compile(".*<link>(?P<link>.*)</link>", re.I)
+
+    found = False
+    title = ""
+    link = ""
+    msg = ""
+
+    (url, unused) = DAILIES["recipe"]
+    try:
+        for line in urllib2.urlopen(url).readlines():
+            match = start_pattern.match(line)
+            if match:
+                found = True
+                continue
+
+            if found:
+                match = title_pattern.match(line)
+                if match:
+                    title = match.group('title')
+                    continue
+
+                match = link_pattern.match(line)
+                if match:
+                    link = match.group('link')
+                    break
+
+        msg = "#RecipeOfTheDay: %s %s" % (title, shorten(link))
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+    return msg
+
+
+def shorten(msg):
+    """Shorten any URLs found in the given string using is.gd"""
+
+    pattern = re.compile('^(ftp|https?)://.+$')
+
+    words = []
+
+    for word in msg.split():
+        if pattern.match(word):
+            quoted = urllib2.quote(word)
+            short = urllib2.urlopen(URL_SHORTENER + quoted).read()
+            words.append(short)
+        else:
+            words.append(word)
+
+    return " ".join(words)
+
+
+def urbanWordOfTheDay(msg=None, link=None):
+    """Get the first word of the day from Urban Dictionary.
+
+    Arguments given are ignored; provided for compatibility with other
+    callbacks."""
+
+    start_pattern = re.compile(".*<item>", re.I)
+    title_pattern = re.compile(".*<title>(?P<title>.*)</title>", re.I)
+    link_pattern = re.compile(".*<link>(?P<link>.*)</link>", re.I)
+    desc_pattern = re.compile(".*<description>", re.I)
+
+    found = False
+    next = False
+    description = ""
+    title = ""
+    link = ""
+    msg = ""
+
+    (url, unused) = DAILIES["uwotd"]
+    try:
+        for line in urllib2.urlopen(url).readlines():
+            match = start_pattern.match(line)
+            if match:
+                found = True
+                continue
+
+            if found:
+                match = title_pattern.match(line)
+                if match:
+                    title = match.group('title')
+                    continue
+
+                match = link_pattern.match(line)
+                if match:
+                    link = match.group('link')
+                    continue
+
+                match = desc_pattern.match(line)
+                if match:
+                    next = True
+                    continue
+
+                if next:
+                    description = dehtmlify(line)
+                    break
+
+
+        msg = "#uwotd: #%s %s %s" % (title, shorten(link), description)
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+    return msg
 
 
 ###
@@ -339,11 +581,21 @@ class Command(object):
     def getHelp(self):
         """Return a suitable help string."""
 
-        return "!%s %s - %s" % (self.name, self.usage, self.summary)
+        return u"!%s %s - %s" % (self.name, self.usage, self.summary)
 
 ###
 ### Bot Globals
 ###
+
+# Dict of things we try to fetch and tweet about on a daily basis.  This
+# maps a string to a URL,function tuple.
+DAILIES = {
+    "wikipedia" : ("http://en.wikipedia.org/wiki/Special:Random", randomWikipedia),
+    "recipe" : ("http://feeds.epicurious.com/newrecipes?format=xml", recipeOfTheDay),
+    "uwotd" : ("http://feeds.urbandictionary.com/UrbanWordOfTheDay", urbanWordOfTheDay),
+    "beer" : ("http://www.beeroftheday.com/", beerOfTheDay),
+    "onthisday" : ("http://learning.blogs.nytimes.com/on-this-day/", onThisDay)
+}
 
 COMMANDS = {
     "countdown" : Command("countdown", cmd_countdown,
@@ -392,6 +644,86 @@ DONTKNOW = [
 
 # Random stuff the bot may say when addressed without a command or regex
 # match.
+ELIZA_RESPONSES = {
+    re.compile("(hello|how are you|how do you do|guten (Tag|Morgen|Abend))", re.I) : [
+            "How do you do?",
+            "A good day to you!",
+            "Hey now! What up, dawg?",
+            "Let's talk..."
+        ],
+    re.compile("( (ro)?bot|machine|computer)", re.I) : [
+            "Do computers worry you?",
+            "What do you think about machines?",
+            "Why do you mention computers?",
+            "What do you think machines have to do with your problem?"
+        ],
+    re.compile("(sorry|apologize)", re.I) : [
+            "I'm not interested in apologies.",
+            "Apologies aren't necessary.",
+            "What feelings do you have when you are sorry?"
+        ],
+    re.compile("I remember", re.I) : [
+            "Did you think I would forget?",
+            "Why do you think I should recall that?",
+            "What about it?"
+        ],
+    re.compile("dream", re.I) : [
+            "Have you ever fantasized about that when you were awake?",
+            "Have you dreamt about that before?",
+            "How do you feel about that in reality?",
+            "What does this suggest to you?"
+        ],
+    re.compile("(mother|father|brother|sister|children|grand[mpf])", re.I) : [
+            "Who else in your family?",
+            "Oh SNAP!",
+            "Tell me more about your family.",
+            "Was that a strong influence for you?",
+            "Who does that remind you of?"
+        ],
+    re.compile("I (wish|want|desire)", re.I) : [
+            "Why do you want that?",
+            "What would it mean if it become true?",
+            "Suppose you got it - then what?",
+            "Be careful what you wish for..."
+        ],
+    re.compile("am (happy|glad)", re.I) : [
+            "What makes you so happy?",
+            "Are you really glad about that?",
+            "I'm glad about that, too.",
+            "What other feelings do you have?"
+        ],
+    re.compile("(sad|depressed)", re.I) : [
+            "I'm sorry to hear that.",
+            "How can I help you with that?",
+            "I'm sure it's not pleasant for you.",
+            "What other feelings do you have?"
+        ],
+    re.compile("(alike|similar|different)", re.I) : [
+            "In what way specifically?",
+            "More alike or more different?",
+            "What do you think makes them similar?",
+            "What do you think makes them different?",
+            "What resemblence do you see?"
+        ],
+    re.compile("because", re.I) : [
+            "Is that the real reason?",
+            "Are you sure about that?",
+            "What other reason might there be?",
+            "Does that reason seem to explain anything else?"
+        ],
+    re.compile("someone", re.I) : [
+            "Can you be more specific?",
+            "Who in particular?",
+            "You are thinking of a special person."
+        ],
+    re.compile("everyone", re.I) : [
+            "Surely not everyone.",
+            "Is that how you feel?",
+            "Who for example?",
+            "Can you think of anybody in particular?"
+        ]
+}
+
 MISC_RESPONSES = [
         "In A.D. 2101, war was beginning.",
         "What happen?",
@@ -409,7 +741,19 @@ MISC_RESPONSES = [
         "Take off every 'ZIG'!",
         "You know what you doing.",
         "Move 'ZIG'.",
-        "For great justice."
+        "For great justice.",
+        "Very interesting.",
+        "Funny you should say that.",
+        "I am not sure I understand you completely.",
+        "What does that suggest to you?",
+        "Please continue...",
+        "Go on...",
+        "I'm the one asking the questions around here.",
+        "Do you feel strongly about discussing such things in public?",
+        "Do you want to tell me more about that?",
+        "I see you have a lot of experience in that area.",
+        "Something is technically wrong. Thanks for noticing - we're going to fix it up and have things back to normal soon.",
+        "Twitter is over capacity. Please wait a moment and try again. For more information, check out: http://status.twitter.com/"
     ]
 
 # Things we can count down to.
@@ -458,7 +802,8 @@ GOODBYES = [
 # simple functions triggered by simple regexes
 REGEX_FUNC_TRIGGER = {
         # new
-        re.compile(".*what's new.*", re.I) : cmd_new
+        re.compile(".*what's new.*", re.I) : cmd_new,
+        re.compile(".*random.*wiki.*", re.I) : randomWikipedia
     }
 
 # strings or list of strings triggered by simple regexes
@@ -652,8 +997,12 @@ REGEX_URL_TRIGGER = {
                         ( cmd_yourmom, "http://www.ahajokes.com" ),
         re.compile("(bug|bee|insect|fly|roach|spider|grasshopper)", re.I) :
                         ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/bugs" ),
-        re.compile("(animal|cat|dog|horse|bird|mammal|cow|chicken|lobster|bear)", re.I) :
-                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/animals" )
+        re.compile("(animal|cat|dog|bat|horse|mammal|cow|chicken|lobster|bear)", re.I) :
+                       ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/animals" ),
+        re.compile("(security|obscurity|excuse|bingo)", re.I) :
+                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/speb" ),
+        re.compile("(quack|peep|bird|chirp|wide world|duck)", re.I) :
+                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/quak" )
     }
 
 ###
@@ -668,6 +1017,7 @@ class Jbot(object):
 
         self.__opts = {
                     "cfg_file" : os.path.expanduser("~/.jbot/config"),
+                    "debug" : False,
                     "user" : BOTNAME
                  }
         self.api = None
@@ -691,6 +1041,36 @@ class Jbot(object):
             self.msg += '\t-h          print this message and exit\n'
             self.msg += '\t-u user     run as this user\n'
             self.msg += '\t-v          increase verbosity\n'
+
+
+    def doDailies(self):
+        """For every "daily", check if we last did it over 24 hours ago
+        and if so, run it."""
+
+        self.verbose("Checking which daily chores are pending...", 2)
+
+        for daily in DAILIES.keys():
+            self.verbose("Checking if '%s' daily is pending..." % daily, 3)
+            filename = "%s%s" % (os.path.expanduser("~/.jbot/"), daily)
+            (url, func) = DAILIES[daily]
+            try:
+                mtime = os.stat(filename)[8]
+                now = time.time()
+                diff = now - mtime
+                if (diff > 86400):
+                    self.tweetFuncResults(func, None, url)
+                    os.utime(filename, None)
+
+            except OSError, e:
+                self.tweetFuncResults(func, None, url)
+                try:
+                    f = file(filename, "w")
+                    f.write("%d" % time.time())
+                    f.close()
+                except IOError, e:
+                    sys.stderr.write("Unable to create to '%s': %s\n" % \
+                        (filename, e.strerror))
+                    continue
 
 
     def getAccessInfo(self, user):
@@ -840,7 +1220,7 @@ class Jbot(object):
             # on, why not.
             return
 
-        if tweeperr and tweeperr.response.status:
+        if tweeperr and tweeperr.response and tweeperr.response.status:
             if tweeperr.response.status == TWITTER_RESPONSE_STATUS["FailWhale"]:
                 errmsg = "Twitter #FailWhale'd on me on %s." % time.asctime()
             elif tweeperr.response.status == TWITTER_RESPONSE_STATUS["Broken"]:
@@ -872,15 +1252,17 @@ class Jbot(object):
         self.verbose("Now %sing: %s" % (action, ",".join(users)), 3)
         for u in users:
             self.verbose("Now %sing %s..." % (action, u), 2)
+            if self.getOpt("debug"):
+                continue
             try:
                 if action == "follow":
                     reply = GREETINGS[random.randint(0,len(GREETINGS)-1)]
-                    reply = re.sub(r'%user', u, reply)
+                    reply = re.sub(r'%user', "@%s" % u, reply)
                     self.tweet(reply)
                     self.api.create_friendship(screen_name=u)
                 elif action == "unfollow":
                     reply = GOODBYES[random.randint(0,len(GOODBYES)-1)]
-                    reply = re.sub(r'%user', u, reply)
+                    reply = re.sub(r'%user', "@%s" % u, reply)
                     self.tweet(reply)
                     self.api.destroy_friendship(screen_name=u)
                 else:
@@ -952,11 +1334,13 @@ class Jbot(object):
         """
 
         try:
-            opts, args = getopt.getopt(inargs, "hu:v")
+            opts, args = getopt.getopt(inargs, "dhu:v")
         except getopt.GetoptError:
             raise self.Usage(EXIT_ERROR)
 
         for o, a in opts:
+            if o in ("-d"):
+                self.setOpt("debug", True)
             if o in ("-h"):
                 raise self.Usage(EXIT_SUCCESS)
             if o in ("-u"):
@@ -980,15 +1364,26 @@ class Jbot(object):
             results = self.api.mentions(since_id=self.lastmessage)
             for msg in results:
                 if not self.processMessage(msg):
+                    response = ""
                     # XXX: this needs to go into a function somewhere else
                     # instead of being crammed in here
                     ip = re.compile("(damm?n? you|shut ?up|die|(cram|stuff) it|piss ?off|(fuck|screw|hate) you|stupid|you (stink|blow)|go to hell|stfu|idiot|(you are|is) annoying|down boy)", re.I)
                     m = ip.match(msg.text)
                     if m:
-                        self.tweet(cmd_insult("!insult %s" % msg.user.screen_name))
+                        response = cmd_insult("!insult %s" % msg.user.screen_name)
+                        response = response.replace("@%s " % msg.user.screen_name, "", 1)
                     else:
-                        self.tweet("@%s %s" % (msg.user.screen_name,
-                                        MISC_RESPONSES[random.randint(0,len(MISC_RESPONSES)-1)]))
+                        for p in ELIZA_RESPONSES.keys():
+                            m = p.search(msg.text)
+                            if m:
+                                response = ELIZA_RESPONSES[random.randint(0,len(ELIZA_RESPONSES)-1)]
+
+                    if response:
+                        self.tweet(u"@%s %s" % (msg.user.screen_name, response, msg.id))
+                    else:
+                        self.tweet(u"@%s %s" % (msg.user.screen_name,
+                                        MISC_RESPONSES[random.randint(0,len(MISC_RESPONSES)-1)]),
+                                        msg.id)
         except tweepy.error.TweepError, e:
             self.handleTweepError(e, "API mentions error for myself.")
 
@@ -1013,7 +1408,7 @@ class Jbot(object):
                 response = cmd_none(msg, command)
 
             if response:
-                self.tweet(response)
+                self.tweet(response, msg.id)
             else:
                 sys.stderr.write("Ran %s but got nothing back...\n" % command)
 
@@ -1034,15 +1429,7 @@ class Jbot(object):
             match = pattern.search(txt)
             if match:
                 func = REGEX_FUNC_TRIGGER[pattern]
-                if callable(func):
-                    response = func(msg)
-                    if response:
-                        self.tweet("@%s %s" % (msg.user.screen_name, response))
-                        return True
-                    else:
-                        sys.stderr.write("Called %s but got nothing..." % func.__name__)
-                else:
-                    sys.stderr.write("Unable to call %s?" % func.__name__)
+                return tweetFuncResult(func)
 
         return False
 
@@ -1126,11 +1513,12 @@ class Jbot(object):
             if match:
                 response = REGEX_STR_TRIGGER[pattern]
                 if isinstance(response, str):
-                    self.tweet("@%s %s" % msg.user.screen_name, response)
+                    self.tweet(u"@%s %s" % (msg.user.screen_name, response), msg.id)
                     return True
                 if isinstance(response, list):
-                    self.tweet("@%s %s" % (msg.user.screen_name,
-                                            response[random.randint(0,len(response)-1)]))
+                    self.tweet(u"@%s %s" % (msg.user.screen_name,
+                                            response[random.randint(0,len(response)-1)]),
+                                            msg.id)
                     return True
 
         return False
@@ -1148,15 +1536,7 @@ class Jbot(object):
             match = pattern.search(txt)
             if match:
                 (func, link) = REGEX_URL_TRIGGER[pattern]
-                if callable(func):
-                    response = func(msg, link)
-                    if response:
-                        self.tweet("@%s %s" % (msg.user.screen_name, response))
-                        return True
-                    else:
-                        sys.stderr.write("Called %s but got nothing..." % func.__name__)
-                else:
-                    sys.stderr.write("Unable to call %s?" % func.__name__)
+                return self.tweetFuncResults(func, msg, link)
 
         return False
 
@@ -1177,8 +1557,9 @@ class Jbot(object):
         self.api = tweepy.API(self.auth)
 
 
-    def tweet(self, msg):
-        """Tweet the given message.
+    def tweet(self, msg, oid=None):
+        """Tweet the given message (possibly in reply to the given
+        original ID.
 
         If the message is too long, it will be truncated.
         """
@@ -1189,9 +1570,37 @@ class Jbot(object):
             msg = ' '.join(msg[:136].split(' ')[0:-1]) + '...'
 
         try:
-            self.api.update_status(msg)
+            if self.getOpt("debug"):
+                sys.stderr.write("-> %s\n" % msg)
+            else:
+                self.api.update_status(msg, oid)
         except tweepy.error.TweepError, e:
             sys.stderr.write("Unable to tweet '%s': %s\n" % (msg, e))
+
+
+    def tweetFuncResults(self, func, msg=None, link=None):
+        """Invoke the given function and tweet the result.
+
+        Returns True if it could tweet something, False otherwise."""
+
+        id = None
+        user = ""
+        if msg:
+            id = msg.id
+            user = "@%s " % msg.user.screen_name
+
+        self.verbose("Calling '%s'..." % func.__name__, 4)
+        if callable(func):
+            response = func(msg, link)
+            if response:
+                self.tweet(u"%s%s" % (user, response), id)
+                return True
+            else:
+                sys.stderr.write("Called %s but got nothing...\n" % func.__name__)
+        else:
+            sys.stderr.write("Unable to call %s?\n" % func.__name__)
+
+        return False
 
 
     def updateFollowship(self):
@@ -1238,6 +1647,9 @@ class Jbot(object):
             self.lastmessage = msgs.pop()
 
         self.verbose("Updating last-run timestamp...", 2)
+        if self.getOpt("debug"):
+            return
+
         try:
             # We still have an open file handle with a lock from when we
             # read our last message, so just rewind, write and then close
@@ -1284,8 +1696,9 @@ if __name__ == "__main__":
 
             jbot.getLastMessage()
             jbot.updateFollowship()
-            jbot.processFollowerMessages()
             jbot.processAtMessages()
+            jbot.processFollowerMessages()
+            jbot.doDailies()
             jbot.updateLastMessage()
 
         except jbot.Usage, u:
