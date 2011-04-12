@@ -106,6 +106,28 @@ def beerOfTheDay(msg=None, link=None):
     return msg
 
 
+def bornToday(msg=None, link=None):
+    """Return information about who was born today.
+
+    Arguments given are ignored; provided for compatibility with other
+    callbacks."""
+
+    msg = ""
+    pattern = re.compile(".*<item><title>(?P<person>.*)</title><link>(?P<link>.*)</link>.*<description>(?P<description>.*)</description>", re.I)
+
+    (url, unused) = DAILIES["born"]
+    try:
+        for line in urllib2.urlopen(url).readlines():
+            match = pattern.match(line)
+            if match:
+                msg = "#BornToday: %s %s %s" % (match.group('person'), shorten(match.group('link')), match.group('description'))
+                break
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+    return msg
+
+
 def cmd_charliesheen(msg, url):
     """Get a quote from Charlie Sheen."""
 
@@ -114,7 +136,7 @@ def cmd_charliesheen(msg, url):
         for line in urllib2.urlopen(url).readlines():
             match = pattern.match(line)
             if match:
-                return u"@%s %s" % (msg.user.screen_name, match.group('quote'))
+                return "@%s %s" % (msg.user.screen_name, match.group('quote'))
 
         sys.stderr.write("Tried to get a quote from %s but found nothing." % url)
     except urllib2.URLError, e:
@@ -132,9 +154,9 @@ def cmd_countdown(msg):
         if COUNTDOWNS.has_key(what):
             t1 = time.mktime(time.localtime())
             t2 = COUNTDOWNS[what]
-            return u"@%s %s" % (msg.user.screen_name, datetime.timedelta(seconds=t2-t1))
+            return "@%s %s" % (msg.user.screen_name, datetime.timedelta(seconds=t2-t1))
 
-    return u"%s" % DONTKNOW[random.randint(0,len(DONTKNOW)-1)]
+    return "%s" % DONTKNOW[random.randint(0,len(DONTKNOW)-1)]
 
 
 def cmd_feature(msg):
@@ -150,7 +172,7 @@ def cmd_feature(msg):
     if match:
         print txt
 
-    return u"@%s Feature request relayed to my owner. Thank you!" % msg.user.screen_name
+    return "@%s Feature request relayed to my owner. Thank you!" % msg.user.screen_name
 
 
 def cmd_factlet(msg, url):
@@ -178,7 +200,7 @@ def cmd_help(msg):
         command = match.group('command')
         try:
             cmd = COMMANDS[command]
-            return u"@%s %s" % (msg.user.screen_name, cmd.getHelp())
+            return "@%s %s" % (msg.user.screen_name, cmd.getHelp())
         except KeyError:
             return cmd_none(msg, command)
 
@@ -187,7 +209,7 @@ def cmd_help(msg):
     if match:
         return JBOT_HELP_URL
 
-    return u"@%s I know of %d commands. Ask me about one of them or see: %s" % \
+    return "@%s I know of %d commands. Ask me about one of them or see: %s" % \
                 (msg.user.screen_name, len(COMMANDS), JBOT_HELP_URL)
 
 
@@ -200,14 +222,14 @@ def cmd_how(msg):
     if match:
         command = match.group('command')
         if command == BOTNAME:
-            return u"@%s Unfortunately, no one can be told what %s is... You have to see it for yourself." % (msg.user.screen_name, BOTNAME)
+            return "@%s Unfortunately, no one can be told what %s is... You have to see it for yourself." % (msg.user.screen_name, BOTNAME)
         try:
             cmd = COMMANDS[command]
-            return u"@%s %s" % (msg.user.screen_name, cmd.how)
+            return "@%s %s" % (msg.user.screen_name, cmd.how)
         except KeyError:
             pass
 
-    return u"@%s %s" % (msg.user.screen_name, DONTKNOW[random.randint(0,len(DONTKNOW)-1)])
+    return "@%s %s" % (msg.user.screen_name, DONTKNOW[random.randint(0,len(DONTKNOW)-1)])
 
 
 def cmd_insult(msg, url):
@@ -225,7 +247,7 @@ def cmd_insult(msg, url):
             for line in urllib2.urlopen(url).readlines():
                 m = ip.match(line)
                 if m:
-                    return u"@%s %s" % (loser, m.group('insult'))
+                    return "@%s %s" % (loser, m.group('insult'))
         except urllib2.URLError, e:
             sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
@@ -237,13 +259,13 @@ def cmd_insult(msg, url):
 def cmd_new(msg):
     """Explain what's new."""
 
-    return u"@%s %s" % (msg.user.screen_name, ",".join(NEW))
+    return "@%s %s" % (msg.user.screen_name, ",".join(NEW))
 
 
 def cmd_none(msg, command):
     """Dummy command to return a "no such command" message."""
 
-    return u"@%s No such command: %s. Try !help or see: %s" % \
+    return "@%s No such command: %s. Try !help or see: %s" % \
                 (msg.user.screen_name, command, JBOT_HELP_URL)
 
 
@@ -300,7 +322,7 @@ def cmd_tool(msg):
     match = pattern.match(txt)
     if match:
         tool = match.group('tool')
-        return u"You're a tool, @%s." % tool
+        return "You're a tool, @%s." % tool
 
 
 def cmd_yourmom(msg, url):
@@ -326,6 +348,48 @@ def dehtmlify(msg):
     return p.sub('', msg)
 
 
+def diedToday(msg=None, link=None):
+    """Return information about who died today.
+
+    Arguments given are ignored; provided for compatibility with other
+    callbacks."""
+
+    msg = ""
+    pattern = re.compile(".*<item><title>(?P<person>.*)</title><link>(?P<link>.*)</link>.*<description>(?P<description>.*)</description>", re.I)
+
+    (url, unused) = DAILIES["died"]
+    try:
+        for line in urllib2.urlopen(url).readlines():
+            match = pattern.match(line)
+            if match:
+                msg = "#DiedToday: %s %s %s" % (match.group('person'), shorten(match.group('link')), match.group('description'))
+                break
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+    return msg
+
+
+def dvorakify(msg):
+    """Take the given message and "encode" it in DVORAK."""
+
+    qwerty = "-=qwertyuiop[]asdfghjkl;'zxcvbnm,./_+QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?"
+    dvorak = "[]',.pyfgcrl/=aoeuidhtns-;qjkxbmwvz{}\"<>PYFGCRL?+AOEUIDHTNS_:QJKXBMWVZ"
+
+    out = ""
+    for char in msg:
+        if char == ' ':
+            out = out + " "
+        else:
+            try:
+                n = qwerty.index(char)
+                out = out + dvorak[n]
+            except ValueError:
+                out = out + "?"
+
+    return out
+
+
 def onThisDay(msg=None, link=None):
     """Show what happened today.
 
@@ -333,6 +397,7 @@ def onThisDay(msg=None, link=None):
     callbacks."""
 
     today = time.strftime("%B-%d").lower()
+    today = re.sub(r'-0', '-', today)
 
     event_pattern = re.compile('.*<p><!-- start top -->(?P<event>.*)', re.I)
     link_pattern = re.compile('.*<p><a class="inTextRefer" href="(?P<link>.*)">Go to article', re.I)
@@ -370,7 +435,7 @@ def randomLineFromUrl(msg, url):
 
     try:
         lines = urllib2.urlopen(url).readlines()
-        return u"%s" % lines[random.randint(0,len(lines)-1)].strip()
+        return "%s" % lines[random.randint(0,len(lines)-1)].strip()
     except urllib2.URLError, e:
         sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
@@ -381,10 +446,10 @@ def randomWikipedia(msg=None, link=None):
     Arguments given are ignored; provided for compatibility with other
     callbacks."""
 
-    title_pattern = re.compile(".*<title>(?P<title>.*) - Wikipedia", re.I)
+    title_pattern = re.compile(".*<title>(?P<title>.*) (\S+) (Wiki|Uncyclo)pedia", re.I)
     line_pattern = re.compile("\s*<p>(?P<text>.*)", re.I)
 
-    (wikiurl, unused) = DAILIES["wikipedia"]
+    wikiurl = link
     first_line = ""
     title = ""
     msg = ""
@@ -581,7 +646,7 @@ class Command(object):
     def getHelp(self):
         """Return a suitable help string."""
 
-        return u"!%s %s - %s" % (self.name, self.usage, self.summary)
+        return "!%s %s - %s" % (self.name, self.usage, self.summary)
 
 ###
 ### Bot Globals
@@ -591,10 +656,14 @@ class Command(object):
 # maps a string to a URL,function tuple.
 DAILIES = {
     "wikipedia" : ("http://en.wikipedia.org/wiki/Special:Random", randomWikipedia),
+    "de-wiki" : ("http://de.wikipedia.org/wiki/Spezial:Zuf%C3%A4llige_Seite", randomWikipedia),
+    "uncyclopedia" : ("http://uncyclopedia.wikia.com/wiki/Special:Random", randomWikipedia),
     "recipe" : ("http://feeds.epicurious.com/newrecipes?format=xml", recipeOfTheDay),
     "uwotd" : ("http://feeds.urbandictionary.com/UrbanWordOfTheDay", urbanWordOfTheDay),
     "beer" : ("http://www.beeroftheday.com/", beerOfTheDay),
-    "onthisday" : ("http://learning.blogs.nytimes.com/on-this-day/", onThisDay)
+    "onthisday" : ("http://learning.blogs.nytimes.com/on-this-day/", onThisDay),
+    "born" : ("http://rss.imdb.com/daily/born/", bornToday),
+    "died" : ("http://rss.imdb.com/daily/died/", diedToday)
 }
 
 COMMANDS = {
@@ -776,6 +845,7 @@ GREETINGS = [
         "I sincerely welcome %user to the list of jbotters.",
         "Yo yo yo, ma homie %user in da house!",
         "Look at that, %user found me! Hooray!",
+        "Good news, everybody! %user has joined the conversation.",
         "Good day, %user. I hope you will find my services to your liking."
     ]
 
@@ -803,7 +873,8 @@ GOODBYES = [
 REGEX_FUNC_TRIGGER = {
         # new
         re.compile(".*what's new.*", re.I) : cmd_new,
-        re.compile(".*random.*wiki.*", re.I) : randomWikipedia
+        re.compile(".*random.*wiki.*", re.I) : randomWikipedia,
+        re.compile(".*(dvorak|encode|keyboard layout).*", re.I) : dvorakify
     }
 
 # strings or list of strings triggered by simple regexes
@@ -981,7 +1052,7 @@ REGEX_STR_TRIGGER = {
 REGEX_URL_TRIGGER = {
         re.compile("(charlie ?sheen|winning|bree olson|tiger ?blood|warlock)", re.I) :
                         ( cmd_charliesheen, "http://www.livethesheendream.com/" ),
-        re.compile("(bruce schneier|crypt|blowfish)", re.I) :
+        re.compile("(bruce schneier|password|crypt|blowfish)", re.I) :
                         ( cmd_schneier, "http://www.schneierfacts.com/" ),
         re.compile(".*(trivia|factual|factlet)", re.I) :
                         ( cmd_trivia, "http://www.nicefacts.com/quickfacts/index.php" ),
@@ -995,14 +1066,14 @@ REGEX_URL_TRIGGER = {
                         ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=vin" ),
         re.compile("(ur([ _])mom|yourmom|m[oa]mma|[^ ]+'s mom)", re.I) :
                         ( cmd_yourmom, "http://www.ahajokes.com" ),
-        re.compile("(bug|bee|insect|fly|roach|spider|grasshopper)", re.I) :
+        re.compile("(bug|insect|fly|roach|spider|grasshopper)", re.I) :
                         ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/bugs" ),
-        re.compile("(animal|cat|dog|bat|horse|mammal|cow|chicken|lobster|bear)", re.I) :
+        re.compile("\b(animal|cat|dog|horse|mammal|cow|chicken|lobster|bear)", re.I) :
                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/animals" ),
         re.compile("(security|obscurity|excuse|bingo)", re.I) :
                         ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/speb" ),
         re.compile("(quack|peep|bird|chirp|wide world|duck)", re.I) :
-                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/quak" )
+                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/quack" )
     }
 
 ###
@@ -1177,7 +1248,8 @@ class Jbot(object):
         self.verbose("Trying to get the last processed message...", 2)
         try:
             self.lmfd = file(self.lmfile, "r+")
-            fcntl.flock(self.lmfd.fileno(), fcntl.LOCK_EX|fcntl.LOCK_NB)
+            if not self.getOpt("debug"):
+                fcntl.flock(self.lmfd.fileno(), fcntl.LOCK_EX|fcntl.LOCK_NB)
             for line in self.lmfd.readlines():
                 line = line.strip()
                 if (line > self.lastmessage):
@@ -1379,9 +1451,9 @@ class Jbot(object):
                                 response = ELIZA_RESPONSES[random.randint(0,len(ELIZA_RESPONSES)-1)]
 
                     if response:
-                        self.tweet(u"@%s %s" % (msg.user.screen_name, response, msg.id))
+                        self.tweet("@%s %s" % (msg.user.screen_name, response, msg.id))
                     else:
-                        self.tweet(u"@%s %s" % (msg.user.screen_name,
+                        self.tweet("@%s %s" % (msg.user.screen_name,
                                         MISC_RESPONSES[random.randint(0,len(MISC_RESPONSES)-1)]),
                                         msg.id)
         except tweepy.error.TweepError, e:
@@ -1443,14 +1515,16 @@ class Jbot(object):
         """
 
         self.verbose("Processing all of my followers messages...", 2)
-        for friend in self.friends:
-            self.verbose("Processing messages from %s (newer than %s)..." % (friend, self.lastmessage), 3)
-            try:
-                results = self.api.user_timeline(screen_name=friend,since_id=self.lastmessage)
-                for msg in results:
-                    self.processMessage(msg)
-            except tweepy.error.TweepError, e:
-                self.handleTweepError(e, "API friends_timeline error for %s" % friend)
+        try:
+            results = self.api.friends_timeline(since_id=self.lastmessage, count=500)
+            for msg in results:
+                # friends_timeline gets our own messages, too, so let's
+                # ignore those
+                if msg.user.screen_name == BOTNAME:
+                    continue
+                self.processMessage(msg)
+        except tweepy.error.TweepError, e:
+            self.handleTweepError(e, "API friends_timeline error")
 
 
     def processMessage(self, msg):
@@ -1513,10 +1587,10 @@ class Jbot(object):
             if match:
                 response = REGEX_STR_TRIGGER[pattern]
                 if isinstance(response, str):
-                    self.tweet(u"@%s %s" % (msg.user.screen_name, response), msg.id)
+                    self.tweet("@%s %s" % (msg.user.screen_name, response), msg.id)
                     return True
                 if isinstance(response, list):
-                    self.tweet(u"@%s %s" % (msg.user.screen_name,
+                    self.tweet("@%s %s" % (msg.user.screen_name,
                                             response[random.randint(0,len(response)-1)]),
                                             msg.id)
                     return True
@@ -1571,7 +1645,7 @@ class Jbot(object):
 
         try:
             if self.getOpt("debug"):
-                sys.stderr.write("-> %s\n" % msg)
+                sys.stderr.write("-> %s\n" % repr(msg))
             else:
                 self.api.update_status(msg, oid)
         except tweepy.error.TweepError, e:
@@ -1585,15 +1659,16 @@ class Jbot(object):
 
         id = None
         user = ""
-        if msg:
-            id = msg.id
-            user = "@%s " % msg.user.screen_name
 
         self.verbose("Calling '%s'..." % func.__name__, 4)
         if callable(func):
             response = func(msg, link)
             if response:
-                self.tweet(u"%s%s" % (user, response), id)
+                if msg:
+                    id = msg.id
+                    if (response.find("@%s " % msg.user.screen_name) != 0):
+                        response = "@%s %s" % (msg.user.screen_name, response)
+                self.tweet(response, id)
                 return True
             else:
                 sys.stderr.write("Called %s but got nothing...\n" % func.__name__)
@@ -1685,6 +1760,8 @@ class Jbot(object):
 
 if __name__ == "__main__":
     try:
+        reload(sys)
+        sys.setdefaultencoding("UTF-8")
         jbot = Jbot()
         try:
             jbot.parseOptions(sys.argv[1:])

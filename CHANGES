@@ -1,4 +1,11 @@
 
+2011-04-12:
+ * reduce number of API calls by fetching friends_timeline instead of
+   individual users' timelines
+ * better unicode handling
+ * additional dailies (bornToday, diedToday)
+ * one more egg
+
 2011-03-31:
  * add a debugging flag to facilitate... debugging
  * add support for and implement various daily calls
