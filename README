@@ -1,9 +1,11 @@
 jbot is simple twitter bot modelled in functionality after a certain IRC
-bot employed at $WORK. It uses the @j_b_o_t account, since @jbot was
-already taken (booo!).  jbot will follow anybody who follows him. Any
-messages by any of the users he follows will be analyzed for certain
-regular expressions that may cause jbot to chime in to the conversation
-with snide remarks or helpful commentary.
+bot employed at $WORK (the public version of which you can find as a
+rather horrendous perl abomination in the 'irc' subdirectory).  It uses
+the @j_b_o_t account, since @jbot was already taken (booo!).  jbot will
+follow anybody who follows him. Any messages by any of the users he
+follows will be analyzed for certain regular expressions that may cause
+jbot to chime in to the conversation with snide remarks or helpful
+commentary.
 
 In addition, jbot also searches for any messages mentioning his name and
 will execute any commands found in those messages. Commands need to be in
