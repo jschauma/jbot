@@ -288,7 +288,7 @@ our %methods= (
 	"ip"	=> 'NetAddr::IP',
 	"ipv4"	=> 'http://ipv6.he.net/exhaustionFeed.php?platform=json',
 	"ipv4countdown"	=> 'http://www.potaroo.net/tools/ipv4/',
-	"jbot"	=> 'SVN:yahoo/ops/nss/user/jans/jbot',
+	"jbot"	=> 'https://github.com/jschauma/jbot/tree/master/irc',
 	"man"  => 'http://www.freebsd.org/cgi/man.cgi?manpath=FreeBSD+7.0-RELEASE+and+Ports&format=ascii&query=',
 	"rhelman"  => 'http://grisha.biz/cgi-bin/man?format=ascii&query=',
 	"motd" => 'fortune(1)',
@@ -2865,6 +2865,7 @@ sub show_toggles($$) {
 	}
 	emit($irc, $who, join(", ", @msg));
 }
+
 
 # function : do_speb
 # purpose  : display a securit problem excuse bingo result
@@ -6786,7 +6787,7 @@ print STDERR "$userhost ($real) <->$who $msg\n";
 				do_mail($1, $userhost, $botowner, "feature request");
 			}
 		} else {
-			if ($userhost !~ /jans\@127.0.0.1/) {
+			if ($userhost !~ /$botowner\@($botownerhost|127.0.0.1)/) {
 				emit($irc, $who, "Yo! Don't be spammin' me master!");
 			}
 		}
@@ -7205,16 +7206,18 @@ print STDERR "Looking for $digest { $hash }...\n";
 			emit($irc, $who, "I can toggle the following:");
 			emit($irc, $who, join(" ", @toggleables));
 		} else {
-			if (defined($CHANNELS{$channel}{"toggles"}{$what})) {
-				$CHANNELS{$channel}{"toggles"}{$what} = $CHANNELS{$channel}{"toggles"}{$what} ? 0 : 1 ;
-				emit($irc, $who, "$what set to " . $CHANNELS{$channel}{"toggles"}{$what});
-				if ($what eq "chatter") {
-					foreach my $t (@chatter_toggles) {
-						$CHANNELS{$channel}{"toggles"}{$t} = $CHANNELS{$channel}{"toggles"}{"chatter"} ? 0 : 1 ;
+			foreach my $word (split(/\s+/, $what)) {
+				if (defined($CHANNELS{$channel}{"toggles"}{$word})) {
+					$CHANNELS{$channel}{"toggles"}{$word} = $CHANNELS{$channel}{"toggles"}{$word} ? 0 : 1 ;
+					emit($irc, $who, "$word set to " . $CHANNELS{$channel}{"toggles"}{$word});
+					if ($word eq "chatter") {
+						foreach my $t (@chatter_toggles) {
+							$CHANNELS{$channel}{"toggles"}{$t} = $CHANNELS{$channel}{"toggles"}{"chatter"} ? 1 : 0 ;
+						}
 					}
+				} elsif (grep(/^$what$/, @toggleables)) {
+					$CHANNELS{$channel}{"toggles"}{$what} = 1;
 				}
-			} elsif (grep(/^$what$/, @toggleables)) {
-				$CHANNELS{$channel}{"toggles"}{$what} = 1;
 			}
 		}
 	}
@@ -7256,6 +7259,17 @@ print STDERR "Looking for $digest { $hash }...\n";
 			do_ud($who, $1);
 		} else {
 			emit($irc, $who, $methods{"ud"} . $1);
+		}
+	}
+
+	elsif (/^unthrottle\s+(.*)/) {
+		my $what = $1;
+		foreach my $word (split(/\s+/, $what)) {
+			foreach my $k ($userhost, "all") {
+				if (defined($throttle{$k}{$word})) {
+					delete($throttle{$k}{$word});
+				}
+			}
 		}
 	}
 
@@ -7428,7 +7442,7 @@ sub do_help($$$)
 			"pwgen" =>	"!pwgen ((-s) N)    -- generate a pasword",
 			"primes" =>	"!primes min max    -- display primes in the given range",
 			"pydoc"	=>	"!pydoc <func>      -- display documentation about given function",
-			"quake" =>	"!quake (us)        -- display information about latest earthquake (in the US)",
+			"quake" => 	"!quake (us)        -- display information about latest earthquake (in the US)",
 			"quote"	=>	"!quote <symbol>    -- show stock price information",
 			"q52"   =>      "!q52 <symbol>      -- show 52 week range quote",
 			"rainbow" =>	"!rainbow <digest> <hash> -- (try to) reveal clear text for given digest hash",
@@ -7440,6 +7454,7 @@ sub do_help($$$)
 			"rosetta" =>	"!rosetta <from> <to> <cmd> -- Rosetta Stone for Unix",
 			"rq"	=>	"!rq <symbol>       -- display real-time quote",
 			"rss"	=>	"!rss               -- display available rss feeds",
+			"s"	=>	"!s <ticket-number> (imp|eportal|ie|ff) -- display information about a siebel ticket",
 			"score" =>	"!score <words>     -- display sports scores",
 			"seen"	=>	"!seen <user>       -- display last time I've seen user",
 			"speb"	=>	"!speb              -- show a securty problem excuse bingo result",
@@ -7481,6 +7496,7 @@ sub do_help($$$)
 			"tyblog" =>	"!tyblog (<user>)   -- display (a user's) latest blog entry title and link",
 			"tz"	=>	"!tz <TZ> (<TZ>)    -- display date in that timezone",
 			"ud"	=>	"!ud <word>         -- look up <word> in the Urban Dictionary",
+			"unthrottle" =>	"!unthrottle <something> -- delete the given throttle",
 			"uptime" =>	"!uptime            -- show since when I've been running",
 			"uwotd" =>	"!uwotd             -- urban dictionary word of the day",
 			"validate" =>	"!validate <uri>    -- validate given URI via validator.w3.org",
@@ -7489,11 +7505,11 @@ sub do_help($$$)
 			"weather"=>	"!weather <loc> (tomorrow(+1))  -- give weather conditions for location",
 			"whois" =>	"!whois <domain>    -- return some whois information",
 			"wiki"	=>	"!wiki <word>       -- fetch the first paragraph from wikipedia",
-			"wolfram" =>	"!wolfram <something> -- display results from Wolfram Alpha",
+			"wolfram" => 	"!wolfram <something> -- display results from Wolfram Alpha",
 			"wotd"	=>	"!wotd              -- display the word of the day",
 			"woot"	=>	"!woot              -- display woot of the day",
 			"wtf"	=>	"!wtf <words>       -- decrypt acronyms",
-			"wwipind" =>	"!wwipind <addr>    -- show what inet_ntop(inet_pton(addr)) would do",
+			"wwipind" => 	"!wwipind <addr>    -- show what inet_ntop(inet_pton(addr)) would do",
 			"y"	=>	"!y                 -- return first link of a yahoo search",
 			"yelp"	=>	"!yelp <what> <where> -- search yelp; <what> should be quoted if multiple words",
 			"zip"	=>	"!zip <loc>         -- show zip codes for given location",
