@@ -9,6 +9,8 @@
 # If we meet some day, and you think jbot's worth it, you can buy me a beer
 # in return.
 
+import HTMLParser
+
 import datetime
 import fcntl
 import getopt
@@ -50,8 +52,7 @@ TWITTER_RESPONSE_STATUS = {
     }
 
 NEW = [
-        "Daily News 'n stuff!",
-        "Better (?) responses."
+        "Wort des Tages"
     ]
 
 ###
@@ -344,8 +345,9 @@ def cmd_yourmom(msg, url):
 def dehtmlify(msg):
     """Strip HTML tags and replace entities in the message."""
 
+    parser = HTMLParser.HTMLParser()
     p = re.compile(r'<.*?>')
-    return p.sub('', msg)
+    return p.sub('', parser.unescape(msg))
 
 
 def diedToday(msg=None, link=None):
@@ -370,14 +372,14 @@ def diedToday(msg=None, link=None):
     return msg
 
 
-def dvorakify(msg):
+def dvorakify(msg, link=None):
     """Take the given message and "encode" it in DVORAK."""
 
     qwerty = "-=qwertyuiop[]asdfghjkl;'zxcvbnm,./_+QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?"
     dvorak = "[]',.pyfgcrl/=aoeuidhtns-;qjkxbmwvz{}\"<>PYFGCRL?+AOEUIDHTNS_:QJKXBMWVZ"
 
     out = ""
-    for char in msg:
+    for char in msg.text:
         if char == ' ':
             out = out + " "
         else:
@@ -388,6 +390,56 @@ def dvorakify(msg):
                 out = out + "?"
 
     return out
+
+
+def germanWordOfTheDay(msg=None, link=None):
+    """Get the first word of the day from the Duden's rss feed.
+
+    Arguments given are ignored; provided for compatibility with other
+    callbacks."""
+
+    start_pattern = re.compile(".*<atom10:link xmlns", re.I)
+    title_pattern = re.compile(".*<title>(?P<title>.*)</title>", re.I)
+    link_pattern = re.compile(".*<id>(?P<link>.*)</id>", re.I)
+    desc_pattern = re.compile(".*\&gt;Bedeutung.*content\"\&gt;(?P<desc>.*)\&lt;")
+
+    found = False
+    description = ""
+    title = ""
+    link = ""
+    msg = ""
+
+    (url, unused) = DAILIES["gwotd"]
+    try:
+        for line in urllib2.urlopen(url).readlines():
+            match = start_pattern.match(line)
+            if match:
+                found = True
+                continue
+
+            if found:
+                match = title_pattern.match(line)
+                if match:
+                    title = match.group('title')
+                    continue
+
+                match = link_pattern.match(line)
+                if match:
+                    link = match.group('link')
+                    continue
+
+                match = desc_pattern.match(line)
+                if match:
+                    description = dehtmlify(match.group('desc'))
+                    break
+
+
+        msg = "#WdT: #%s %s %s" % (title, shorten(link), description)
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+    return msg
+
 
 
 def onThisDay(msg=None, link=None):
@@ -491,7 +543,7 @@ def recipeOfTheDay(msg=None, link=None):
     link = ""
     msg = ""
 
-    (url, unused) = DAILIES["recipe"]
+    (url, unused) = WEEK_DAILIES["recipe"]
     try:
         for line in urllib2.urlopen(url).readlines():
             match = start_pattern.match(line)
@@ -658,12 +710,18 @@ DAILIES = {
     "wikipedia" : ("http://en.wikipedia.org/wiki/Special:Random", randomWikipedia),
     "de-wiki" : ("http://de.wikipedia.org/wiki/Spezial:Zuf%C3%A4llige_Seite", randomWikipedia),
     "uncyclopedia" : ("http://uncyclopedia.wikia.com/wiki/Special:Random", randomWikipedia),
-    "recipe" : ("http://feeds.epicurious.com/newrecipes?format=xml", recipeOfTheDay),
+    "gwotd" : ("http://feeds2.feedburner.com/duden/WdT?format=xml", germanWordOfTheDay),
     "uwotd" : ("http://feeds.urbandictionary.com/UrbanWordOfTheDay", urbanWordOfTheDay),
     "beer" : ("http://www.beeroftheday.com/", beerOfTheDay),
     "onthisday" : ("http://learning.blogs.nytimes.com/on-this-day/", onThisDay),
     "born" : ("http://rss.imdb.com/daily/born/", bornToday),
     "died" : ("http://rss.imdb.com/daily/died/", diedToday)
+}
+
+# Dict of things we try to fetch and tweet about on a weekdaily basis (ie
+# Mon - Fri).  This maps a string to a URL,function tuple.
+WEEK_DAILIES = {
+    "recipe" : ("http://feeds.epicurious.com/newrecipes?format=xml", recipeOfTheDay)
 }
 
 COMMANDS = {
@@ -1120,28 +1178,48 @@ class Jbot(object):
 
         self.verbose("Checking which daily chores are pending...", 2)
 
-        for daily in DAILIES.keys():
-            self.verbose("Checking if '%s' daily is pending..." % daily, 3)
-            filename = "%s%s" % (os.path.expanduser("~/.jbot/"), daily)
-            (url, func) = DAILIES[daily]
-            try:
-                mtime = os.stat(filename)[8]
-                now = time.time()
-                diff = now - mtime
-                if (diff > 86400):
-                    self.tweetFuncResults(func, None, url)
-                    os.utime(filename, None)
+        dicts = [ DAILIES ]
 
-            except OSError, e:
+        # Monday = 0, Saturday = 6, Sunday = 7
+        if datetime.datetime.now().isoweekday() < 6:
+            self.verbose("Adding week-dailies to list of possibly pending chores...", 3)
+            dicts.append(WEEK_DAILIES)
+
+        for chore in dicts:
+            for daily in chore.keys():
+                (url, func) = chore[daily]
+                self.doDaily(daily, url, func)
+
+
+    def doDaily(self, name, url, func):
+        """Check if the given 'daily' was run within the last 24 hours.
+        If not, run it.
+
+        Arguments:
+            name -- name of the 'daily' chore
+            url -- link to pass to the function
+            func -- function to invoke
+        """
+
+        self.verbose("Checking if '%s' daily is pending..." % name, 3)
+        filename = "%s%s" % (os.path.expanduser("~/.jbot/"), name)
+        try:
+            mtime = os.stat(filename)[8]
+            now = time.time()
+            diff = now - mtime
+            if (diff > 86400):
                 self.tweetFuncResults(func, None, url)
-                try:
-                    f = file(filename, "w")
-                    f.write("%d" % time.time())
-                    f.close()
-                except IOError, e:
-                    sys.stderr.write("Unable to create to '%s': %s\n" % \
-                        (filename, e.strerror))
-                    continue
+                os.utime(filename, None)
+
+        except OSError, e:
+            self.tweetFuncResults(func, None, url)
+            try:
+                f = file(filename, "w")
+                f.write("%d" % time.time())
+                f.close()
+            except IOError, e:
+                sys.stderr.write("Unable to create to '%s': %s\n" % \
+                    (filename, e.strerror))
 
 
     def getAccessInfo(self, user):
@@ -1501,7 +1579,7 @@ class Jbot(object):
             match = pattern.search(txt)
             if match:
                 func = REGEX_FUNC_TRIGGER[pattern]
-                return tweetFuncResult(func)
+                return self.tweetFuncResults(func, msg, None)
 
         return False
 
