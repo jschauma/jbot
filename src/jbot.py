@@ -20,6 +20,7 @@ import re
 import sys
 import time
 import tweepy
+import urllib
 import urllib2
 
 ###
@@ -52,7 +53,7 @@ TWITTER_RESPONSE_STATUS = {
     }
 
 NEW = [
-        "Wort des Tages"
+        "!better <this> or <that>"
     ]
 
 ###
@@ -127,6 +128,50 @@ def bornToday(msg=None, link=None):
         sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
     return msg
+
+
+def cmd_better(msg, url):
+    """Figure out what's better."""
+
+    response = ""
+    terms = {}
+    input = msg.text.replace("@%s !better " % BOTNAME, "")
+    for term in input.split(" or ", 1):
+        turl = "%squery?%s" % (url, urllib.urlencode({'term':term}))
+        pattern = re.compile('{"term": .* "sucks": (?P<sucks>\d+), "rocks": (?P<rocks>\d+)}', re.I)
+        try:
+            for line in urllib2.urlopen(turl).readlines():
+                match = pattern.match(line)
+                if match:
+                    s = float(match.group('sucks'))
+                    r = float(match.group('rocks'))
+                    if (r == 0):
+                        terms[term] = 0.0
+                    else:
+                        terms[term] = float(10 - ((s/(s + r)) * 10))
+        except urllib2.URLError, e:
+            sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+    if len(terms) != 2:
+        return "@%s Sorry, I can't parse that as a valid '!better' request - please try again." % msg.user.screen_name
+    else:
+        tkeys = terms.keys()
+        if terms[tkeys[0]] == terms[tkeys[1]]:
+            return "@%s Pretty much the same, I'd say. I guess you'd like %s better." % \
+                            (msg.user.screen_name, tkeys[random.randint(0,len(tkeys)-1)])
+        else:
+            # sorting yields a list of key=>val pairs sorted by val
+            response = sorted(terms.iteritems(), key=lambda (k,v): (k,v))[0][0]
+
+    snarkisms = [ "Clearly: <t>",
+                    "<t> - duh.",
+                    "<t>, of course.",
+                    "You have to ask? It's <t>, dummy.",
+                    "<t> is much better, if you ask me.",
+                    "Hmmm... <t>, perhaps?",
+                    "I'm gonna go ahead and say: <t>" ]
+    phrase = snarkisms[random.randint(0,len(snarkisms)-1)]
+    return "@%s %s" % (msg.user.screen_name, phrase.replace("<t>", response))
 
 
 def cmd_charliesheen(msg, url):
@@ -236,7 +281,10 @@ def cmd_how(msg):
 def cmd_insult(msg, url):
     """Insult somebody."""
 
-    txt = msg.text
+    if type(msg) is unicode:
+        txt = msg
+    else:
+        txt = msg.text
     pattern = re.compile('.*!insult @?(?P<somebody>\S+)')
     match = pattern.match(txt)
     if match:
@@ -725,6 +773,9 @@ WEEK_DAILIES = {
 }
 
 COMMANDS = {
+    "better"    : Command("better", cmd_better,
+                        "<this> or <that>", "judge what's better",
+                        "http://sucks-rocks.com/", "URL"),
     "countdown" : Command("countdown", cmd_countdown,
                         "<event>", "display countdown until event",
                         "hardcoded", "Tweet"),
@@ -1151,8 +1202,8 @@ class Jbot(object):
                  }
         self.api = None
         self.api_credentials = {}
-        self.followers = []
-        self.friends = []
+        self.api_followers = []
+        self.file_followers = []
         self.lastmessage = 0
         self.lmfile = os.path.expanduser("~/.jbot/lastmessage")
         self.lmfd = None
@@ -1254,7 +1305,7 @@ class Jbot(object):
             raise
 
 
-    def getList(self, what, user):
+    def getListFromApi(self, what, user):
         """Get a full list of things from the API.
 
         Returns:
@@ -1269,7 +1320,7 @@ class Jbot(object):
         elif what == "friends":
             func = self.api.friends
         else:
-            sys.stderr.write("Illegal value '%s' for getList.\n" % what)
+            sys.stderr.write("Illegal value '%s' for getListFromApi.\n" % what)
             return wanted
 
         # We only get 100 at a time; our rate limits is 350 calls per
@@ -1442,10 +1493,18 @@ class Jbot(object):
                 (cfile, e.strerror))
             sys.exit(EXIT_ERROR)
 
+        followers_pattern = re.compile('^(followers)\s*=\s*(?P<followers>.+)')
         key_pattern = re.compile('^(?P<username>[^#]+)_key\s*=\s*(?P<key>.+)')
         secret_pattern = re.compile('^(?P<username>[^#]+)_secret\s*=\s*(?P<secret>.+)')
         for line in f.readlines():
             line = line.strip()
+
+            followers_match = followers_pattern.match(line)
+            if followers_match:
+                followers = followers_match.group('followers')
+                self.file_followers = followers.split(',')
+                continue
+
             key_match = key_pattern.match(line)
             if key_match:
                 user = key_match.group('username')
@@ -1458,6 +1517,7 @@ class Jbot(object):
                         self.users[user] = {
                             "key" : key_match.group('key')
                         }
+                continue
 
             secret_match = secret_pattern.match(line)
             if secret_match:
@@ -1471,6 +1531,7 @@ class Jbot(object):
                         self.users[user] = {
                             "secret" : secret_match.group('secret')
                         }
+                continue
 
 
     def parseOptions(self, inargs):
@@ -1513,6 +1574,8 @@ class Jbot(object):
         try:
             results = self.api.mentions(since_id=self.lastmessage)
             for msg in results:
+                if msg.user.screen_name == BOTNAME:
+                    continue
                 if not self.processMessage(msg):
                     response = ""
                     # XXX: this needs to go into a function somewhere else
@@ -1520,7 +1583,7 @@ class Jbot(object):
                     ip = re.compile("(damm?n? you|shut ?up|die|(cram|stuff) it|piss ?off|(fuck|screw|hate) you|stupid|you (stink|blow)|go to hell|stfu|idiot|(you are|is) annoying|down boy)", re.I)
                     m = ip.match(msg.text)
                     if m:
-                        response = cmd_insult("!insult %s" % msg.user.screen_name)
+                        response = cmd_insult("!insult %s" % msg.user.screen_name, "")
                         response = response.replace("@%s " % msg.user.screen_name, "", 1)
                     else:
                         for p in ELIZA_RESPONSES.keys():
@@ -1756,39 +1819,71 @@ class Jbot(object):
         return False
 
 
+    def updateConfig(self, which, what):
+        """Update an item in the config file with the given content."""
+
+        fname = self.getOpt("cfg_file")
+        tname = "%s.tmp" % self.getOpt("cfg_file")
+
+        try:
+            rf = file(fname)
+        except IOError, e:
+            sys.stderr.write("Unable to open config file '%s': %s\n" % \
+                (fname, e.strerror))
+            sys.exit(EXIT_ERROR)
+
+        try:
+            wf = file(tname, 'w')
+        except IOError, e:
+            sys.stderr.write("Unable to open config file '%s': %s\n" % \
+                (fname, e.strerror))
+            sys.exit(EXIT_ERROR)
+
+        wanted_pattern = re.compile("^(%s)\s*=\s*.*" % which)
+        for line in rf.readlines():
+            wanted_match = wanted_pattern.match(line)
+            if wanted_match:
+                wf.write("%s = %s\n" % (which, ",".join(what)))
+            else:
+                wf.write(line)
+
+        rf.close()
+        wf.close()
+
+        try:
+            os.rename(tname, fname)
+        except IOError, e:
+            sys.stderr.write("Unable to install updated config file: %s\n" % e.strerror)
+            sys.exit(EXIT_ERROR)
+
+
     def updateFollowship(self):
         """Find people following this bot and follow them, stop following
         those that stopped following us."""
 
         self.verbose("Updating followship...", 2)
         user = self.getOpt("user")
-        self.followers = self.getList("followers", user)
-        self.friends = self.getList("friends", user)
+        self.api_followers = self.getListFromApi("followers", user)
 
-        if not self.friends or (len(self.friends) == 0) or \
-            not self.followers or (len(self.followers) == 0):
+        if not self.api_followers or (len(self.api_followers) == 0):
             self.verbose("Failed to get followship. Pretending nothing changed.\n")
             return
 
-        new_followers = list(set.difference(set(self.followers), set(self.friends)))
+        new_followers = list(set.difference(set(self.api_followers), set(self.file_followers)))
 
         if len(new_followers):
             self.followOrUnfollow("follow", new_followers)
 
-        gone_followers = list(set.difference(set(self.friends), set(self.followers)))
+        gone_followers = list(set.difference(set(self.file_followers), set(self.api_followers)))
         if len(gone_followers):
-            if len(gone_followers) == len(self.followers):
+            if len(gone_followers) == len(self.api_followers):
                 sys.stderr.write("All followers gone?\n")
                 sys.exit(EXIT_ERROR)
-
             self.followOrUnfollow("unfollow", gone_followers)
 
-        # At the end of the day, we should have identical membership
-        # between those we follow and those that follow us.
-        self.followers = list(set.intersection(
-                                set.union(set(new_followers), set(self.followers)),
-                                set(self.friends)))
-        self.friends = self.followers
+        if (len(gone_followers) or len(new_followers)):
+            self.updateConfig("followers", self.api_followers)
+            self.file_followers = self.api_followers
 
 
     def updateLastMessage(self):
