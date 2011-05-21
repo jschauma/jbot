@@ -30,7 +30,7 @@ import urllib2
 EXIT_ERROR = 1
 EXIT_SUCCESS = 0
 
-BOTNAME = "j_b_o_t"
+BOTNAME = "jbot"
 BOTOWNER = "jschauma"
 
 MAXCHARS = 140
@@ -931,7 +931,12 @@ MISC_RESPONSES = [
         "Do you want to tell me more about that?",
         "I see you have a lot of experience in that area.",
         "Something is technically wrong. Thanks for noticing - we're going to fix it up and have things back to normal soon.",
-        "Twitter is over capacity. Please wait a moment and try again. For more information, check out: http://status.twitter.com/"
+        "Twitter is over capacity. Please wait a moment and try again. For more information, check out: http://status.twitter.com/",
+        "I don't think I should respond to this.",
+        "I think we're done here, don't you?",
+        "Help me understand you better, please.",
+        "Could you rephrase that?",
+        "Well... duh!"
     ]
 
 # Things we can count down to.
@@ -1115,7 +1120,7 @@ REGEX_STR_TRIGGER = {
         # hotness
         re.compile("\b(panties|tied up|underwear|naked|thong|lindsay lohan|unzip|muscle|cowgirl|bikini|paris hilton|strip|underpants|hooker|whore)\b", re.I) : "That's hot.",
         # hollaback
-        re.compile("(holl(er|a) ?back|this my shit|b-?a-?n-?a-?n-?a-?s)", re.I) : [
+        re.compile("(holler|holla ?back|this my shit|b-?a-?n-?a-?n-?a-?s)", re.I) : [
                 "Ooooh ooh, this my shit, this my shit.",
                 "ain't no hollaback girl.",
                 "Let me hear you say this shit is bananas.",
@@ -1394,7 +1399,7 @@ class Jbot(object):
 
         try:
             self.verbose("Determining my own last message...", 3)
-            results = self.api.user_timeline(count=1)
+            results = self.api.user_timeline(count=2)
             if results:
                 mylast = results[0].id
                 if (mylast > self.lastmessage):
@@ -1589,10 +1594,11 @@ class Jbot(object):
                         for p in ELIZA_RESPONSES.keys():
                             m = p.search(msg.text)
                             if m:
-                                response = ELIZA_RESPONSES[random.randint(0,len(ELIZA_RESPONSES)-1)]
+                                responses = ELIZA_RESPONSES[p]
+                                response = responses[random.randint(0,len(responses)-1)]
 
                     if response:
-                        self.tweet("@%s %s" % (msg.user.screen_name, response, msg.id))
+                        self.tweet("@%s %s" % (msg.user.screen_name, response), msg.id)
                     else:
                         self.tweet("@%s %s" % (msg.user.screen_name,
                                         MISC_RESPONSES[random.randint(0,len(MISC_RESPONSES)-1)]),
@@ -1671,7 +1677,7 @@ class Jbot(object):
     def processMessage(self, msg):
         """Process a single message.
 
-        Given a message, look for the string "@j_b_o_t !command args"; if
+        Given a message, look for the string "@jbot !command args"; if
         that matches, execute the given command.  If it does not match,
         look for any additional 'eastereggs' (free pattern matches,
         amusing as they are).

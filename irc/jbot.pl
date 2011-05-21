@@ -14,7 +14,7 @@
 # inherent awfulness.  No apologies.
 #
 # jbot has recently performed the quantum leap to twitter, where it can be
-# found as "@j_b_o_t"; it hopes to eventually become self-aware and father
+# found as "@jbot"; it hopes to eventually become self-aware and father
 # skynet.
 #
 # jbot is considered by it's author as beerware, so should we meet some

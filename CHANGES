@@ -1,3 +1,8 @@
+2011-05-21:
+ * rename botname to 'jbot' at last
+ * improved eliza responses
+ * avoid deadlock if last message was a retweet
+
 2011-05-14:
  * !better this or that
  * keep followship in a file
