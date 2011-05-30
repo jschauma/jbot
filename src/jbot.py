@@ -14,6 +14,7 @@ import HTMLParser
 import datetime
 import fcntl
 import getopt
+import htmlentitydefs
 import os
 import random
 import re
@@ -53,7 +54,7 @@ TWITTER_RESPONSE_STATUS = {
     }
 
 NEW = [
-        "!better <this> or <that>"
+        "!flic.kr <long flickr URL> -- return flic.kr URL"
     ]
 
 ###
@@ -205,6 +206,29 @@ def cmd_countdown(msg):
     return "%s" % DONTKNOW[random.randint(0,len(DONTKNOW)-1)]
 
 
+def cmd_cursebird(msg, url):
+    """Display cursebird ranking."""
+
+    pattern = re.compile('.*!cursebird @?(?P<somebody>\S+)')
+    match = pattern.match(msg.text)
+    if match:
+        pottymouth = match.group('somebody')
+        try:
+            json = "%s%s.json" % (url, pottymouth)
+            swears = re.compile('.*swears_like": "(?P<like>.*)", "level": (?P<level>\d+),.*"xp_score": (?P<score>\d+),.*', re.I)
+            for line in urllib2.urlopen(json).readlines():
+                m = swears.match(line)
+                if m:
+                    return ".@%s swears like %s -- Level: %s (%s)\n%s" % \
+                                (pottymouth, m.group('like'), m.group('level'), m.group('score'), \
+				 shorten("%s%s" % (url, pottymouth)))
+        except urllib2.URLError, e:
+            sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+    sys.stderr.write("Entered cursebird function with no matching message?")
+
+
+
 def cmd_feature(msg):
     """Handle a feature request.
 
@@ -234,6 +258,44 @@ def cmd_factlet(msg, url):
         sys.stderr.write("Tried to get a fact from %s but found nothing." % url)
     except urllib2.URLError, e:
         sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+
+def cmd_flickr(msg):
+    """Turn a long flickr URL into a short flic.kr URL
+
+    This is accomplished via base58 conversion of the picture ID into a
+    short code as per
+    http://www.flickr.com/groups/api/discuss/72157616713786392/
+    """
+
+    if type(msg) is unicode or type(msg) is str:
+        txt = msg
+        prefix = ""
+    else:
+        txt = msg.text
+        prefix = "@%s " % msg.user.screen_name
+
+    encoded = ""
+    pattern = re.compile('.*http://www.flickr.com/.*/(?P<url>[0-9]+)/?')
+    match = pattern.match(txt)
+    if match:
+        num = int(match.group('url'))
+    else:
+        return "%sThat did not look like a flickr URL, sorry." % prefix
+
+    base58 = list("123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ")
+    base_count = len(base58)
+
+    while (num >= base_count):
+        div = num/base_count
+        mod = (num-(base_count*int(div)))
+        encoded = base58[mod] + encoded
+        num = int(div)
+
+    if num:
+        encoded = base58[num] + encoded
+
+    return "%shttp://flic.kr/p/%s" % (prefix, encoded)
 
 
 def cmd_help(msg):
@@ -305,7 +367,7 @@ def cmd_insult(msg, url):
     sys.stderr.write("Entered insult function with no matching message?")
 
 
-def cmd_new(msg):
+def cmd_new(msg, link=None):
     """Explain what's new."""
 
     return "@%s %s" % (msg.user.screen_name, ",".join(NEW))
@@ -524,8 +586,40 @@ def onThisDay(msg=None, link=None):
     if result:
         return "#OnThisDay: %s %s" % (shorten(url), result)
     else:
-        sys.stderr.write("Unable to get even of the day.\n")
+        sys.stderr.write("Unable to get event of the day.\n")
         return result
+
+
+def picOfTheDay(msg=None, link=None):
+    """Get the picture of the day.
+
+    Arguments given are ignored; provided for compatibility with other
+    callbacks."""
+
+    ym = time.strftime("%Y/%m")
+    d = int(time.strftime("%d")) - 1
+
+    (url, unused) = DAILIES["flickr"]
+
+    url = "%s/%s/%d" % (url, ym, d)
+
+    pic_pattern = re.compile('.*<span class="photo_container pc_m"><a href="(?P<link>/photos/.*)" title="(?P<title>.*) by (?P<author>.*)"><img src', re.I)
+
+    try:
+        for line in urllib2.urlopen(url).readlines():
+            match = pic_pattern.match(line)
+            if match:
+                link = "http://www.flickr.com%s" % match.group('link')
+                title = match.group('title') if match.group('title') else 'Untitled'
+                author = match.group('author')
+                link = cmd_flickr(link)
+                return "\"%s\" by %s: %s" % (unescape(title), unescape(author), link)
+
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+    sys.stderr.write("Entered picOfTheDay function with no matching line?")
+
 
 
 def randomLineFromUrl(msg, url):
@@ -633,6 +727,29 @@ def shorten(msg):
             words.append(word)
 
     return " ".join(words)
+
+
+def unescape(text):
+    """http://effbot.org/zone/re-sub.htm#unescape-html"""
+    def fixup(m):
+        text = m.group(0)
+        if text[:2] == "&#":
+            # character reference
+            try:
+                if text[:3] == "&#x":
+                    return unichr(int(text[3:-1], 16))
+                else:
+                    return unichr(int(text[2:-1]))
+            except ValueError:
+                pass
+        else:
+            # named entity
+            try:
+                text = unichr(htmlentitydefs.name2codepoint[text[1:-1]])
+            except KeyError:
+                pass
+        return text # leave as is
+    return re.sub("&#?\w+;", fixup, text)
 
 
 def urbanWordOfTheDay(msg=None, link=None):
@@ -763,7 +880,8 @@ DAILIES = {
     "beer" : ("http://www.beeroftheday.com/", beerOfTheDay),
     "onthisday" : ("http://learning.blogs.nytimes.com/on-this-day/", onThisDay),
     "born" : ("http://rss.imdb.com/daily/born/", bornToday),
-    "died" : ("http://rss.imdb.com/daily/died/", diedToday)
+    "died" : ("http://rss.imdb.com/daily/died/", diedToday),
+    "flickr" : ("http://www.flickr.com/explore/interesting", picOfTheDay)
 }
 
 # Dict of things we try to fetch and tweet about on a weekdaily basis (ie
@@ -779,9 +897,15 @@ COMMANDS = {
     "countdown" : Command("countdown", cmd_countdown,
                         "<event>", "display countdown until event",
                         "hardcoded", "Tweet"),
+    "cursebird" : Command("cursebird", cmd_cursebird,
+                        "<somebody>", "display given user's @cursebird ranking",
+                        "http://www.cursebird.com/", "URL"),
     "feature" : Command("feature", cmd_feature,
                         "<descr>", "request a feature from the author",
                         "message to stdout", "Tweet"),
+    "flic.kr" : Command("flic.kr", cmd_flickr,
+                        "<long flickr URL>", "turn a long flickr URL into a short flic.kr URL",
+                        "base_58 conversion", "Tweet"),
     "help"    : Command("help", cmd_help,
                         "(<command>)", "request help (about the given command)",
                         "hardcoded", "Tweet"),
@@ -1152,7 +1276,7 @@ REGEX_STR_TRIGGER = {
         # Vikings
         re.compile("viking", re.I) : "Spam, lovely Spam, wonderful Spam.",
         # Monkeys
-        re.compile("(monkey|orangutan|gorilla|macaque|chimp|\bape\blemur|simian|primate)", re.I) : [
+        re.compile("(howard ?stern|stern ?show|monkey|orangutan|gorilla|macaque|chimp|\bape\blemur|simian|primate)", re.I) : [
                 "Bababooey bababooey bababooey!",
                 "Fafa Fooey.",
                 "Mama Monkey.",

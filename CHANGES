@@ -1,3 +1,8 @@
+2011-05-30:
+ * !cursebird <username> => display given user's cursentage
+ * !flic.kr <long flickr URL> => short flickr URL
+ * picOfTheDay (from flickr's "interesting" pictures)
+
 2011-05-21:
  * rename botname to 'jbot' at last
  * improved eliza responses
