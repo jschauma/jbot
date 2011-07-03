@@ -54,7 +54,9 @@ TWITTER_RESPONSE_STATUS = {
     }
 
 NEW = [
-        "!flic.kr <long flickr URL> -- return flic.kr URL"
+        "better date calculation for flickr",
+        "@cursebird is dead :-(",
+        "I can now brick people, yay!"
     ]
 
 ###
@@ -175,6 +177,43 @@ def cmd_better(msg, url):
     return "@%s %s" % (msg.user.screen_name, phrase.replace("<t>", response))
 
 
+def cmd_brick(msg, url):
+    """Insult somebody."""
+
+    # We hardcode 'url' here to be able to be called both as a command and
+    # from a regex.
+    url = "http://images.search.yahoo.com/search/images?p=brick"
+
+    if type(msg) is unicode:
+        txt = msg
+    else:
+        txt = msg.text
+
+    pattern = re.compile('.*brick @?(?P<somebody>[a-z0-9_]+)', re.I)
+    match = pattern.match(txt)
+    if match:
+        brickee = match.group('somebody')
+        if (brickee == BOTNAME):
+            brickee = msg.user.screen_name
+        try:
+            found = re.compile('.*imgurl=', re.I)
+            for line in urllib2.urlopen(url).readlines():
+                m = found.match(line)
+                if m:
+                    line = re.sub(r'(.*imgurl=.*?&)rurl=.*', r'\1', line)
+                    urls = re.split(r'.*?imgurl=(.*?)&', line)
+                    urls = filter(lambda i: i != '' and i != '\n', urls)
+                    # split means the first item is leading garbage
+                    img = urls[random.randint(1,len(urls)-1)]
+                    return "@%s %s" % (brickee, shorten("http://" + urllib.unquote(img)))
+        except urllib2.URLError, e:
+            sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+        sys.stderr.write("No brick found on %s.\n" % url)
+
+    sys.stderr.write("Entered brick function with no matching message?")
+
+
 def cmd_charliesheen(msg, url):
     """Get a quote from Charlie Sheen."""
 
@@ -204,29 +243,6 @@ def cmd_countdown(msg):
             return "@%s %s" % (msg.user.screen_name, datetime.timedelta(seconds=t2-t1))
 
     return "%s" % DONTKNOW[random.randint(0,len(DONTKNOW)-1)]
-
-
-def cmd_cursebird(msg, url):
-    """Display cursebird ranking."""
-
-    pattern = re.compile('.*!cursebird @?(?P<somebody>\S+)')
-    match = pattern.match(msg.text)
-    if match:
-        pottymouth = match.group('somebody')
-        try:
-            json = "%s%s.json" % (url, pottymouth)
-            swears = re.compile('.*swears_like": "(?P<like>.*)", "level": (?P<level>\d+),.*"xp_score": (?P<score>\d+),.*', re.I)
-            for line in urllib2.urlopen(json).readlines():
-                m = swears.match(line)
-                if m:
-                    return ".@%s swears like %s -- Level: %s (%s)\n%s" % \
-                                (pottymouth, m.group('like'), m.group('level'), m.group('score'), \
-				 shorten("%s%s" % (url, pottymouth)))
-        except urllib2.URLError, e:
-            sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
-
-    sys.stderr.write("Entered cursebird function with no matching message?")
-
 
 
 def cmd_feature(msg):
@@ -347,7 +363,7 @@ def cmd_insult(msg, url):
         txt = msg
     else:
         txt = msg.text
-    pattern = re.compile('.*!insult @?(?P<somebody>\S+)')
+    pattern = re.compile('.*insult @?(?P<somebody>[a-z0-9_]+)', re.I)
     match = pattern.match(txt)
     if match:
         loser = match.group('somebody')
@@ -596,12 +612,11 @@ def picOfTheDay(msg=None, link=None):
     Arguments given are ignored; provided for compatibility with other
     callbacks."""
 
-    ym = time.strftime("%Y/%m")
-    d = int(time.strftime("%d")) - 1
+    ymd = datetime.date.today() - datetime.timedelta(days=1)
 
     (url, unused) = DAILIES["flickr"]
 
-    url = "%s/%s/%d" % (url, ym, d)
+    url = url + ymd.strftime("/%Y/%m/%d")
 
     pic_pattern = re.compile('.*<span class="photo_container pc_m"><a href="(?P<link>/photos/.*)" title="(?P<title>.*) by (?P<author>.*)"><img src', re.I)
 
@@ -894,12 +909,12 @@ COMMANDS = {
     "better"    : Command("better", cmd_better,
                         "<this> or <that>", "judge what's better",
                         "http://sucks-rocks.com/", "URL"),
+    "brick"     : Command("brick", cmd_brick,
+                        "<user>", "brick a user",
+                        "magic sauce", "Tweet"),
     "countdown" : Command("countdown", cmd_countdown,
                         "<event>", "display countdown until event",
                         "hardcoded", "Tweet"),
-    "cursebird" : Command("cursebird", cmd_cursebird,
-                        "<somebody>", "display given user's @cursebird ranking",
-                        "http://www.cursebird.com/", "URL"),
     "feature" : Command("feature", cmd_feature,
                         "<descr>", "request a feature from the author",
                         "message to stdout", "Tweet"),
@@ -1112,7 +1127,8 @@ REGEX_FUNC_TRIGGER = {
         # new
         re.compile(".*what's new.*", re.I) : cmd_new,
         re.compile(".*random.*wiki.*", re.I) : randomWikipedia,
-        re.compile(".*(dvorak|encode|keyboard layout).*", re.I) : dvorakify
+        re.compile(".*(dvorak|encode|keyboard layout).*", re.I) : dvorakify,
+        re.compile(".*brick .*", re.I) : cmd_brick
     }
 
 # strings or list of strings triggered by simple regexes
@@ -1937,7 +1953,7 @@ class Jbot(object):
             if response:
                 if msg:
                     id = msg.id
-                    if (response.find("@%s " % msg.user.screen_name) != 0):
+                    if not re.match(".*@\S+", response):
                         response = "@%s %s" % (msg.user.screen_name, response)
                 self.tweet(response, id)
                 return True

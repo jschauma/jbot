@@ -1,3 +1,8 @@
+2011-07-03:
+ * @cursebird is dead :-(
+ * better date calculation for flickr
+ * !brick <username>
+
 2011-05-30:
  * !cursebird <username> => display given user's cursentage
  * !flic.kr <long flickr URL> => short flickr URL
