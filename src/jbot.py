@@ -54,9 +54,7 @@ TWITTER_RESPONSE_STATUS = {
     }
 
 NEW = [
-        "better date calculation for flickr",
-        "@cursebird is dead :-(",
-        "I can now brick people, yay!"
+        "!image something"
     ]
 
 ###
@@ -177,12 +175,8 @@ def cmd_better(msg, url):
     return "@%s %s" % (msg.user.screen_name, phrase.replace("<t>", response))
 
 
-def cmd_brick(msg, url):
+def cmd_brick(msg, url=None):
     """Insult somebody."""
-
-    # We hardcode 'url' here to be able to be called both as a command and
-    # from a regex.
-    url = "http://images.search.yahoo.com/search/images?p=brick"
 
     if type(msg) is unicode:
         txt = msg
@@ -195,21 +189,9 @@ def cmd_brick(msg, url):
         brickee = match.group('somebody')
         if (brickee == BOTNAME):
             brickee = msg.user.screen_name
-        try:
-            found = re.compile('.*imgurl=', re.I)
-            for line in urllib2.urlopen(url).readlines():
-                m = found.match(line)
-                if m:
-                    line = re.sub(r'(.*imgurl=.*?&)rurl=.*', r'\1', line)
-                    urls = re.split(r'.*?imgurl=(.*?)&', line)
-                    urls = filter(lambda i: i != '' and i != '\n', urls)
-                    # split means the first item is leading garbage
-                    img = urls[random.randint(1,len(urls)-1)]
-                    return "@%s %s" % (brickee, shorten("http://" + urllib.unquote(img)))
-        except urllib2.URLError, e:
-            sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
-        sys.stderr.write("No brick found on %s.\n" % url)
+        img = searchImage(msg, "brick")
+        return "@%s %s" % (brickee, img)
 
     sys.stderr.write("Entered brick function with no matching message?")
 
@@ -354,6 +336,28 @@ def cmd_how(msg):
             pass
 
     return "@%s %s" % (msg.user.screen_name, DONTKNOW[random.randint(0,len(DONTKNOW)-1)])
+
+
+def cmd_image(msg, url=None):
+    """Return an image based on what is searched for."""
+
+    if type(msg) is unicode:
+        txt = msg
+        user = ""
+    else:
+        txt = msg.text
+        user = "@%s " % msg.user.screen_name
+
+    pattern = re.compile('.*!image (?P<term>.+)', re.I)
+    match = pattern.match(txt)
+    if match:
+        term = match.group('term')
+        term = urllib.quote_plus(term)
+        img = searchImage(msg, term)
+        return "%s%s" % (user, img)
+
+    sys.stderr.write("Entered image function with no matching message?")
+
 
 
 def cmd_insult(msg, url):
@@ -577,7 +581,7 @@ def onThisDay(msg=None, link=None):
     today = time.strftime("%B-%d").lower()
     today = re.sub(r'-0', '-', today)
 
-    event_pattern = re.compile('.*<p><!-- start top -->(?P<event>.*)', re.I)
+    event_pattern = re.compile('.*Buy a reproduction &#187;</a></li></ul></div><p></p><p>(?P<event>.*?)</p>', re.I)
     link_pattern = re.compile('.*<p><a class="inTextRefer" href="(?P<link>.*)">Go to article', re.I)
 
     result = ""
@@ -724,6 +728,30 @@ def recipeOfTheDay(msg=None, link=None):
         sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
     return msg
+
+
+def searchImage(msg=None, term=None):
+    """Search images.yahoo.com for the given term and return a random
+    result link.
+
+    'msg' is ignored, but accepted for REGEX func handling"""
+
+    url = "http://images.search.yahoo.com/search/images?p=" + term
+    found = re.compile('.*imgurl=', re.I)
+    try:
+        for line in urllib2.urlopen(url).readlines():
+            m = found.match(line)
+            if m:
+                line = re.sub(r'(.*imgurl=.*?&)rurl=.*', r'\1', line)
+                urls = re.split(r'.*?imgurl=(.*?)&', line)
+                urls = filter(lambda i: i != '' and i != '\n', urls)
+                # split means the first item is leading garbage
+                img = urls[random.randint(1,len(urls)-1)]
+                return shorten("http://" + urllib.unquote(img))
+    except urllib2.URLError, e:
+        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
+    sys.stderr.write("No %s found on %s.\n" % (term, url))
 
 
 def shorten(msg):
@@ -927,6 +955,9 @@ COMMANDS = {
     "how"     : Command("how", cmd_how,
                         "(<command>)", "ask how something works",
                         "hardcoded", "Tweet"),
+    "image"   : Command("image", cmd_image,
+                        "<term>", "display an image matching <term>",
+                        "http://search.yahoo.com", "Tweet"),
     "insult"  : Command("insult", cmd_insult,
                         "<somebody>", "insult somebody",
                         "http://www.randominsults.net/", "URL"),
@@ -1207,7 +1238,7 @@ REGEX_STR_TRIGGER = {
                 "And now for something completely different.",
                 "'People called Romanes they go the house?'",
                 "Romani ite domum.",
-                "My hovercraft if full of eels."
+                "My hovercraft is full of eels."
             ],
         # loveboat
         re.compile("loveboat", re.I) : [
@@ -1327,7 +1358,8 @@ REGEX_URL_TRIGGER = {
         re.compile("(security|obscurity|excuse|bingo)", re.I) :
                         ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/speb" ),
         re.compile("(quack|peep|bird|chirp|wide world|duck)", re.I) :
-                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/quack" )
+                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/quack" ),
+        re.compile("facepalm", re.I) : ( searchImage, "facepalm" )
     }
 
 ###
@@ -1349,6 +1381,7 @@ class Jbot(object):
         self.api_credentials = {}
         self.api_followers = []
         self.file_followers = []
+        self.followfail = False
         self.lastmessage = 0
         self.lmfile = os.path.expanduser("~/.jbot/lastmessage")
         self.lmfd = None
@@ -1489,10 +1522,12 @@ class Jbot(object):
                 if (num > threshold):
                     self.verbose("Reached my limit of %d users in %d pages. Sorry." % \
                                     (len(wanted), num), 4)
+                    self.followfail = True
                     break
 
             wanted.sort()
         except tweepy.error.TweepError, e:
+            self.followfail = True
             self.handleTweepError(e, "Unable to get list of %s for %s" % (what, user))
 
         return wanted
@@ -1581,6 +1616,7 @@ class Jbot(object):
                     # reset time, so we appear to be throttled for 59:59
                     # minutes, but actually aren't.  Let's pretend that
                     # didn't happen.
+                    self.verbose(info + "\n" + errmsg + "\n" + rate_limit["remaining_hits"])
                     return
             else:
                 errmsg = "On %s Twitter told me:\n'%s'" % (time.asctime(), tweeperr)
@@ -1594,6 +1630,10 @@ class Jbot(object):
 
     def followOrUnfollow(self, action, users):
         """Start to follow the given list of users."""
+
+        if self.followfail:
+            self.verbose("Failed to properly update followship from API, so I won't act on the new list.")
+            return
 
         self.verbose("Now %sing: %s" % (action, ",".join(users)), 3)
         for u in users:
@@ -1968,6 +2008,10 @@ class Jbot(object):
     def updateConfig(self, which, what):
         """Update an item in the config file with the given content."""
 
+        if self.followfail:
+            self.verbose("Failed to properly update followship from API, so I won't write a new config.")
+            return
+
         fname = self.getOpt("cfg_file")
         tname = "%s.tmp" % self.getOpt("cfg_file")
 
@@ -2011,21 +2055,24 @@ class Jbot(object):
         user = self.getOpt("user")
         self.api_followers = self.getListFromApi("followers", user)
 
-        if not self.api_followers or (len(self.api_followers) == 0):
+        if self.followfail or not self.api_followers or (len(self.api_followers) == 0):
             self.verbose("Failed to get followship. Pretending nothing changed.\n")
             return
 
         new_followers = list(set.difference(set(self.api_followers), set(self.file_followers)))
-
-        if len(new_followers):
-            self.followOrUnfollow("follow", new_followers)
-
         gone_followers = list(set.difference(set(self.file_followers), set(self.api_followers)))
+
         if len(gone_followers):
             if len(gone_followers) == len(self.api_followers):
                 sys.stderr.write("All followers gone?\n")
                 sys.exit(EXIT_ERROR)
+            elif len(gone_followers) > 5:
+                sys.stderr.write("Suspiciously large lost followers: %d\n" % len(gone_followers))
+                sys.exit(EXIT_ERROR)
             self.followOrUnfollow("unfollow", gone_followers)
+
+        if len(new_followers):
+            self.followOrUnfollow("follow", new_followers)
 
         if (len(gone_followers) or len(new_followers)):
             self.updateConfig("followers", self.api_followers)
