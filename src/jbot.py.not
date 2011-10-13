@@ -18,7 +18,6 @@ import htmlentitydefs
 import os
 import random
 import re
-import signal
 import sys
 import time
 import tweepy
@@ -195,21 +194,6 @@ def cmd_brick(msg, url=None):
         return "@%s %s" % (brickee, img)
 
     sys.stderr.write("Entered brick function with no matching message?")
-
-
-def cmd_charliesheen(msg, url):
-    """Get a quote from Charlie Sheen."""
-
-    try:
-        pattern = re.compile('^<h1>(?P<quote>.*)</h1>', re.I)
-        for line in urllib2.urlopen(url).readlines():
-            match = pattern.match(line)
-            if match:
-                return "@%s %s" % (msg.user.screen_name, match.group('quote'))
-
-        sys.stderr.write("Tried to get a quote from %s but found nothing." % url)
-    except urllib2.URLError, e:
-        sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
 
 
 def cmd_countdown(msg):
@@ -771,18 +755,6 @@ def shorten(msg):
             words.append(word)
 
     return " ".join(words)
-
-
-def timeout(signum, frame):
-    """Catch SIGALRM and exit cleanly.
-
-    Every now and then, jbot manages to hang itself.  Since it usually
-    completes within seconds, we have an alarm set to abort.  We have a
-    signal handler purely to genrate an informayional message.
-    """
-
-    sys.stderr.write("Caught SIGALRM, aborting...\n")
-    sys.exit(EXIT_ERROR)
 
 
 def unescape(text):
@@ -1358,13 +1330,53 @@ REGEX_STR_TRIGGER = {
                 "Fla Fla Flo Fly.",
                 "Fafa Fooey.",
                 "FaFa Fo Hi."
-            ]
+            ],
+        # Charlie Sheen
+        re.compile("(charlie ?sheen|winning|bree olson|tiger ?blood|warlock)", re.I) : [
+            "Good luck on your travels. You're going to need it. Badly.",
+            "I take great umbrage with that.",
+            "If people could just read behind the hieroglyphic.",
+            "Resentments are the rocket fuel that lives in the tip of my sabre.",
+            "She was attacking me with a small fork.",
+            "Can I have one part of my life that isn't TMZ'd up the butt?",
+            "I have a disease? Bullshit. I cured it with my brain.",
+            "Winning, anyone? Rhymes with winning. Anyone? Yeah, that would be us. Sorry, man, didn't make the rules. Oops!",
+            "I'm tired of pretending I'm not a total bitchin' rock star from Mars",
+            "You can't process me with a normal brain."
+            "If you borrowed my brain for five seconds, you'd be like, 'Dude! Can't handle it, unplug this bastard!'",
+            "It fires in a way that's maybe not from, uh... this terrestrial realm.",
+            "I was banging seven-gram rocks, because that's how I roll.",
+            "I have one speed, I have one gear: G",
+            "Can't is the cancer of happening.",
+            "Wow.  What does that mean? I'm bi-WINNING.",
+            "I am battle-tested bayonets, bro.",
+            "I'm so tired of pretending my life isn't perfect and bitching and just winning every second and I'm not perfect and bitchin'.",
+            "Look what I'm dealing with, man, I'm dealing with fools and trolls.",
+            "It's just strafing runs in my underwear before my first cup of coffee, because I don't have time for these clowns.",
+            "I have the right to kill me, but you do not have the right to judge me. Boom. That's the whole movie. That's life.",
+            "I'm sorry man, I got magic and I've got poetry in my fingertips, you know, most of the time, and this includes naps.",
+            "I'm an F-18, bro.",
+            "I'm not Thomas Jefferson. He was a pussy.",
+            "I'm bi-winning."
+            "There's a new sheriff in town. And he has an army of assassins.",
+            "The run I was on made Sinatra, Flynn, Jagger, Richards, all of them look like droopy-eyed armless children.",
+            "The only thing I'm addicted to right now is winning.",
+            "[CBS] picked a fight with a warlock.",
+            "If you're a part of my family, I will love you violently.",
+            "C'mon bro, I won best picture at 20. I wasn't even trying. I wasn't even warm.",
+            "Bring me Dr. Clown shoes.",
+            "That's my life. Deal with it. Oh, wait, can't process it? LOSERS.",
+            "Shut up. Stop. Move forward.",
+            "I don't think people are ready for the message I'm delivering.",
+            "I am special, and I will never be one of you.",
+            "I've been a veteran of the unspeakable.",
+            "Dying is for fools. Amateurs.",
+            "I guess I'm just that goddamn bitchin'."
+        ]
     }
 
 # Map a regex to a URL function - URL tuple
 REGEX_URL_TRIGGER = {
-        re.compile("(charlie ?sheen|winning|bree olson|tiger ?blood|warlock)", re.I) :
-                        ( cmd_charliesheen, "http://www.livethesheendream.com/" ),
         re.compile("(bruce schneier|password|crypt|blowfish)", re.I) :
                         ( cmd_schneier, "http://www.schneierfacts.com/" ),
         re.compile(".*(trivia|factual|factlet)", re.I) :
@@ -2158,8 +2170,6 @@ if __name__ == "__main__":
         sys.setdefaultencoding("UTF-8")
         jbot = Jbot()
         try:
-            signal.signal(signal.SIGALRM, timeout)
-            signal.alarm(300)
             jbot.parseOptions(sys.argv[1:])
             jbot.parseConfig(jbot.getOpt("cfg_file"))
             jbot.verifyConfig()
