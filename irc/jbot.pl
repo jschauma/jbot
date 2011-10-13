@@ -198,8 +198,10 @@ our $whois_by_field = "";
 # we clumsily stuffed primes(6) into that dir
 $ENV{'PATH'} = $ENV{'PATH'} . ":/usr/games:/home/$botowner/bin";
 
-our @whats_new = ( "!subnet_resolver [ipv4[/nm]] -- display resolvers for given subnet",
-			"fix !beer" );
+our @whats_new = ( "!tfln -- display a text from last night",
+			"removed !cursebird (defunct)",
+			"!isup", "!swtime", "!img",
+
 
 our %cmds;
 our %cmdrs;
@@ -266,7 +268,6 @@ our %methods= (
 	"chuck"  => 'http://4q.cc/index.php?pid=fact&person=chuck',
 	"cowsay" => 'cowsay(1)',
 	"countdown" => "$botnick's brain",
-	"cursebird" => 'http://cursebird.com/',
 	"cve"	=> 'http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-',
 	"digest" => 'digest(1)',
 	"errno" => '/usr/include/sys/errno.h',
@@ -285,9 +286,11 @@ our %methods= (
 	"help"  => 'hardcoded',
 	"how"	=> 'hardcoded',
 	"imdb"	=> 'http://lab.abhinayrathore.com/imdb/index.php',
+	"img"	=> 'http://images.search.yahoo.com/search/images?p=',
 	"ip"	=> 'NetAddr::IP',
 	"ipv4"	=> 'http://ipv6.he.net/exhaustionFeed.php?platform=json',
 	"ipv4countdown"	=> 'http://www.potaroo.net/tools/ipv4/',
+	"isup"	=> 'http://www.isup.me/',
 	"jbot"	=> 'https://github.com/jschauma/jbot/tree/master/irc',
 	"man"  => 'http://www.freebsd.org/cgi/man.cgi?manpath=FreeBSD+7.0-RELEASE+and+Ports&format=ascii&query=',
 	"rhelman"  => 'http://grisha.biz/cgi-bin/man?format=ascii&query=',
@@ -298,11 +301,15 @@ our %methods= (
 	"movies_soon" => 'http://rss.ent.yahoo.com/movies/upcoming.xml',
 	"movies_gossip" => 'http://rss.ent.yahoo.com/movies/movie_headlines.xml',
 	"mrt"  => 'http://4q.cc/index.php?pid=fact&person=mrt',
+	"mysql51" => 'site:dev.mysql.com/doc/refman/5.1/en/+',
+	"mysql55" => 'site:dev.mysql.com/doc/refman/5.5/en/+',
+	"mysql56" => 'site:dev.mysql.com/doc/refman/5.6/en/+',
 	"ninja" => 's3crit',
 	"nts"	=> 'sendmail',
 	"ohiny" => 'http://www.overheardinnewyork.com/bin/randomentry.cgi',
 	"omg"   => 'http://omg.yahoo.com/latest/rss/news',
 	"perldoc" => '/usr/local/bin/perldoc -t -f',
+	"php"   => 'http://php.corp.yahoo.com/manual/en/function.',
 	"ping" => 'Net::Ping::External',
 	"pirate" => 'crawled out me bung hole',
 	"primes" => 'primes(6)',
@@ -327,7 +334,9 @@ our %methods= (
 	"symbol" => 'http://finance.yahoo.com/lookup?s=',
 	"sysexit" => '/usr/include/sysexits.h',
 	"sysexits" => '/usr/include/sysexits.h',
+	"tfln"  => 'http://textsfromlastnight.com/Texts-From-Best-Nights-Today.html',
 	"tld"	=> 'http://www.iana.org/domains/root/db/',
+	"tfln"  => 'http://textsfromlastnight.com/Texts-From-Best-Nights-Today.html',
 	"tiny" => 'http://is.gd/api.php?longurl=',
 	"top5yb" => 'http://rss.news.yahoo.com/rss/business',
 	"top5ydvds" => 'http://rss.movies.yahoo.com/dvd/topsellers.xml',
@@ -602,7 +611,8 @@ our @jans = (
 		"rather not use perl.",
 		"not use powerpoint, word or excel.",
 		"Tell ver to do the work.",
-		"Fork.",
+		"Fork. Twice.",
+		"Succumb to paranoia.",
 		"Go back to New York.",
 	);
 
@@ -634,6 +644,7 @@ our @kevink = (
 		"Move to Portland (or somewhere up there).",
 		"Have a shitty strike price.",
 		"Rather have high-density light rays shot in his eyes.",
+		"Consider his organs superfluous.",
 	);
 
 our @jfesler = (
@@ -661,7 +672,7 @@ our @pettit = (
 		"Frob the DNS.",
 		"Prefer Roundtable.",
 		"Have a comeback.",
-		"Touch dog's in the middle of the night.",
+		"Touch dog's in the dead of the night.",
 	);
 
 our @rayriver = (
@@ -671,7 +682,8 @@ our @rayriver = (
 
 our @farisa = (
 		"Dump the NOC.",
-		"Manage your traffic.",
+		"301 your HTTP traffic.",
+		"Delete your mail queues.",
 	);
 
 our @johneagl = (
@@ -681,6 +693,7 @@ our @johneagl = (
 		"Make other people dump the NOC, too.",
 		"Try to exploit the bots.",
 		"Manage your traffic.",
+		"Become a hackovator but only get one iPad.",
 	);
 
 our @leesay = (
@@ -714,6 +727,7 @@ our @jmturner = (
 		"Rock out to Sade.",
 		"Get angry when bill collectors call Sylvia.",
 		"Grow pointy hair.",
+		"Become a professional fanboi.",
 	);
 
 our @mikek = (
@@ -748,6 +762,7 @@ our @blysik = (
 		"Fork again.",
 		"Grow pointy hair.",
 		"Rock out to Sade.",
+		"Become a professional fanboi.",
 	);
 
 our @jbot = (
@@ -762,6 +777,7 @@ our @penick = (
 		"Kindly tell the requestor to stuff it.",
 		"Burn all hippies.",
 		"Try to arouse his turkey.",
+		"Not take shit from any trucks.",
 	);
 
 our @bhaga = (
@@ -1074,6 +1090,35 @@ sub is_throttled($$;$$) {
 	return 0;
 }
 
+# function : do_isup
+# purpose  : determine if the given site is up or not
+# inputs   : string (ought to be a domain or something)
+
+sub do_isup($$) {
+	my ($who, $what) = @_;
+
+	$what =~ s/^.*:\/\///;
+
+	my $query = $methods{'isup'} . $what;
+
+	my $found = 0;
+	foreach my $line (getContent($query, 0)) {
+		if ($line =~ m/<div id="container">/) {
+			$found++;
+			next;
+		}
+		if ($found == 1) {
+			$found++;
+			next;
+		}
+		if ($found == 2) {
+			emit($irc, $who, dehtmlify($line));
+			last;
+		}
+	}
+}
+
+
 # function : dehtmlify
 # purpose  : strip html and return plain text
 # input    : string
@@ -1179,6 +1224,66 @@ sub on_me_action {
 	$channel = lc($channel);
 	$CHANNELS{$channel}{"seen"}{$nick} = strftime("%a %b %e %H:%M:%S %Z %Y", localtime());
 }
+
+# function : do_swtime
+# purpose  : who to respond to,
+#            display swatch time (or convert given 'beats' into real time)
+# inputs   : time in either beats or "HH:mm:SS" format
+#            well, actually the input is whatever, but those are the
+#            formats that will be understood
+
+sub do_swtime($$) {
+	my ($who, $t) = @_;
+
+	if (!$t) {
+		$t = strftime("%H:%M:%S", gmtime());
+	}
+
+	$t =~ s/\s+//g;
+
+	if ($t =~ m/^(\d{1,3})$/) {
+		$t = $t * 86.4;
+		my (undef, undef, undef, $mday,$mon,$year,undef) = gmtime();
+		my $h = ($t/(60*60)) % 24;
+		my $m = ($t/60) % 60;
+		my $s = $t % 60;
+		$mon += 1;
+		$mon = sprintf("%02d", $mon);
+		$year += 1900;
+		$h = sprintf("%02d", $h);
+		$m = sprintf("%02d", $m);
+		$s = sprintf("%02d", $s);
+		($s, $m, $h, undef) = localtime(str2time("$year-$mon-$mday $h:$m:$s"));
+		my $h1 = sprintf("%02d", $h);
+		my $m1 = sprintf("%02d", $m);
+		my $s1 = sprintf("%02d", $s);
+		$t += 86.4;
+		$h = ($t/(60*60)) % 24;
+		$m = ($t/60) % 60;
+		$s = $t % 60;
+		($s, $m, $h, undef) = localtime(str2time("$year-$mon-$mday $h:$m:$s"));
+		$h = sprintf("%02d", $h);
+		$m = sprintf("%02d", $m);
+		$s = sprintf("%02d", $s);
+		emit($irc, $who, "$h1:$m1:$s1 - $h:$m:$s");
+		return;
+	}
+
+	if ($t =~ m/^([0-2][0-9]):([0-5][0-9]):([0-5][0-9])$/) {
+		my $h = $1;
+                my $m = $2;
+                my $s = $3;
+                my $t = $s + (60*$m) + (60*60*$h);
+                my $beats = floor($t/86.4);
+		emit($irc, $who, $beats);
+		return;
+	}
+
+	emit($irc, $who, "Invalid format. Either use [0-9]{1,3} or HH:MM:SS.");
+}
+
+
+
 
 ###
 ### CHATTER
@@ -2687,47 +2792,6 @@ sub do_countdown($) {
 }
 
 
-# function : do_cursebird
-# purpose  : display last curse or score of curser
-
-sub do_cursebird($$) {
-	my ($who, $tweetie) = @_;
-	my ($query);
-	my $found = 0;
-
-	$query = $methods{"cursebird"};
-	if ($tweetie) {
-		$query .= $tweetie . ".json";
-	}
-
-	if (!$tweetie) {
-		foreach my $line (getContent($query)) {
-			if ($line =~ m/.*?<div class="tweet">\s*<a href="\/([^"]+)".*?<span class="text">(.*?)<\/span>/i) {
-				my $twit = $1;
-				my $msg = dehtmlify($2);
-				emit($irc, $who, "$msg");
-				emit($irc, $who, $query . $twit);
-				last;
-			}
-		}
-	} else {
-		my $json = new JSON;
-		my $cursebird;
-		eval {
-			$cursebird = $json->allow_nonref->utf8->relaxed->escape_slash->loose->allow_singlequote->allow_barekey->decode(getContent($query));
-		};
-		if ($@) {
-			emit($irc, $who, "No cursebird found for $tweetie.");
-			return;
-		}
-		my %cb = %{$cursebird};
-		if (scalar(keys(%cb))) {
-			emit($irc, $who, "$tweetie swears like " . $cb{"swears_like"});
-			emit($irc, $who, "Level: " . $cb{"level"} . " (" . $cb{"xp_score"} . ")");
-		}
-	}
-}
-
 
 # function : do_cve
 # purpose  : display information for a cve vulnerability
@@ -3353,6 +3417,31 @@ sub do_snopes($$) {
 		}
 	}
 }
+
+# function : do_tfln
+# purpose  : get a 'text from last night'
+# inputs   : recipient
+# outputs  : results (if any) are returned
+
+sub do_tfln($) {
+	my ($who) = @_;
+
+	my $query = $methods{"tfln"};
+	my @txts;
+
+	foreach my $line (getContent($query, 0)) {
+		if ($line =~ m/^<p><a href="\/Text-Replies-.*">(.*?)<\/a>/) {
+			push(@txts, dehtmlify($1));
+		}
+	}
+
+	if (scalar(@txts)) {
+		emit($irc, $who, $txts[int(rand(scalar(@txts)))]);
+	} else {
+		emit($irc, $who, "Huh? No texts from last night found.");
+	}
+}
+
 
 # function : do_tiny
 # purpose  : tiny a URL via is.gd
@@ -6432,6 +6521,28 @@ sub periodic_throttle($$$$) {
 
 }
 
+# function : do_img
+# purpose  : search for an image and return the link
+# inputs   : search terms
+
+sub do_img($$) {
+	my ($who, $what) = @_;
+	my $query = $methods{'img'} . encode_entities($what);
+
+	foreach my $line (getContent($query, 0)) {
+		if ($line =~ m/(.*imgurl=.*?&)rurl=.*/) {
+			my $all = $1;
+			$all =~ s/.*?imgurl=//;
+			my @urls = split(/.*?imgurl=(.*?)&/, $all);
+			@urls = grep(/^[^"]+$/, @urls);
+			my $img = $urls[int(rand(scalar(@urls) - 1) + 1)];
+			emit($irc, $who, do_tiny("http://" . uri_unescape($img)));
+			last;
+		}
+	}
+}
+
+
 
 # function : do_imdb
 # purpose  : retrieve information from imdb
@@ -6755,6 +6866,10 @@ print STDERR "$userhost ($real) <->$who $msg\n";
 		$ENV{'TZ'}  = $tz;
 	}
 
+	elsif (/^(swtime|beat)(\s+.+)?/i) {
+		do_swtime($who, $2);
+	}
+
 	elsif (/^cowsay\s+(.*)/i) {
 		if (!is_throttled('cowsay', 'all')) {
 			do_shell("cowsay $1", $who, "", 15);
@@ -6864,6 +6979,10 @@ print STDERR "$userhost ($real) <->$who $msg\n";
 		do_shell("/usr/bin/host $1", $who, "", 7);
 	}
 
+	elsif (/^(img|image)\s+(\S+)/) {
+		do_img($who, $2);
+	}
+
 	elsif (/^imdb\s+(.*)/) {
 		do_imdb($who, $1);
 	}
@@ -6885,6 +7004,10 @@ print STDERR "$userhost ($real) <->$who $msg\n";
 	elsif (/^ipv4(\s+((afri|ap|lac)nic|arin|ripe))?$/i) {
 print STDERR "$1\n";
 		do_ipv4($who, $1);
+	}
+
+	elsif (/^isup\s+(.*)/) {
+		do_isup($who, $1);
 	}
 
 	elsif (/^$botnick($|\s+.*)/i) {
@@ -6933,6 +7056,14 @@ print STDERR "$1\n";
 		}
 		do_shell("morse $cmd", $who, "$2", 0, 1);
 	}
+
+	elsif (/^mysql5([156])\s+(.*)/i) {
+		my $v = $1;
+		my $what = $methods{"mysql5$v"} . $2;
+		$what =~ s/\s/+/g;
+		do_g($who, $what);
+	}
+
 
 	elsif (/([^ ]+)stab (.*)(\s+#\S+)?/) {
 		my $kind = $1;
@@ -7192,6 +7323,10 @@ print STDERR "Looking for $digest { $hash }...\n";
 		do_tld($who, $nick, $1);
 	}
 
+	elsif (/^tfln\s*$/i) {
+		do_tfln($who);
+	}
+
 	elsif (/^toggle(?:\s+(\S+)(\s+#\S+)?)?\s*$/i) {
 		my $what = $1;
 		my $c = $2;
@@ -7338,6 +7473,8 @@ print STDERR "Looking for $digest { $hash }...\n";
 			emit($irc, $who, "You have to see it for yourself.");
 		} elsif ($term =~ /(grogglefroth|jfesler)/) {
 			emit($irc, $who, "http://grogglefroth.com/");
+		} elsif ($term =~ m/^mokey$/) {
+			emit($irc, $who, "Mokey represents a highly spiritual and artistic, hippie-type (she recites poetry, sketches and paints), and usually remains quiet and contemplative, though even she can get annoyed from time to time.");
 		} else {
 			do_shell("ywtf $term", $who, "", 5);
 		}
@@ -7419,8 +7556,10 @@ sub do_help($$$)
 			"how"	=>	"!how <command>     -- show how we do <command>",
 			"host"	=>	"!host <hostname>   -- look up <hostname>",
 			"imdb"	=>	"!imdb <title>      -- display information about a movie title",
+			"img"	=>	"!img <string>      -- find an image for you",
 			"ip"	=>	"!ip <ip|cidr> (info)  -- display information about IP or CIDR",
 			"ipv4"	=>	"!ipv4 (afrinic|apnic|arin|lacnic|ripe) -- display IPv4 allocation for given RIR",
+			"isup"	=>	"!isup <site>       -- check if given site is down for you only",
 			"$botnick" =>	"http://produce.yahoo.com/jans/jbot/",
 			"like"	=>	"!like <somebody> <something> -- provide a guess as to whether somebody likes something or not",
 			"man"	=>	"!man <command>     -- display summary and link for freebsd command",
@@ -7462,10 +7601,12 @@ sub do_help($$$)
 			"signal" =>	"!signal <name|number> -- display matching signal values",
 			"snopes" =>	"!snopes <myth>     -- display snopes urls about a myth",
 			"stfu"  =>	"!stfu (<user>)     -- display channel chatterers",
+			"swtime" =>	"!swtime [0-9]{1,3}|HH:MM:SS  -- convert to/from Swatch Internet Time",
 			"symbol" =>	"!symbol <symbols>  -- lookup information about the stock symbol",
 			"synonym"=>	"!synonym <word>    -- provide synonyms for given word",
 			"sysexit" =>	"!sysexit <name|number> -- display matching sysexit values",
 			"tld"	=>	"!tld <tld>         -- show what <tld> is",
+			"tfln"  =>	"!tfln -- display a text from last night",
 			"time"	=>	"!time <location>   -- display time in location",
 			"toggle" =>	"!toggle (<something>|possible|show) -- toggle a feature",
 			"top5"	=>	"!top5[gy[e]] (<date>) -- display top5 search queries from Y!/Google",
