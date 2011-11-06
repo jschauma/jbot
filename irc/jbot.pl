@@ -198,9 +198,7 @@ our $whois_by_field = "";
 # we clumsily stuffed primes(6) into that dir
 $ENV{'PATH'} = $ENV{'PATH'} . ":/usr/games:/home/$botowner/bin";
 
-our @whats_new = ( "!tfln -- display a text from last night",
-			"removed !cursebird (defunct)",
-			"!isup", "!swtime", "!img",
+our @whats_new = ( "!klout <user> -- display a user's klout info") ;
 
 
 our %cmds;
@@ -292,6 +290,7 @@ our %methods= (
 	"ipv4countdown"	=> 'http://www.potaroo.net/tools/ipv4/',
 	"isup"	=> 'http://www.isup.me/',
 	"jbot"	=> 'https://github.com/jschauma/jbot/tree/master/irc',
+	"klout" => 'http://klout.com',
 	"man"  => 'http://www.freebsd.org/cgi/man.cgi?manpath=FreeBSD+7.0-RELEASE+and+Ports&format=ascii&query=',
 	"rhelman"  => 'http://grisha.biz/cgi-bin/man?format=ascii&query=',
 	"motd" => 'fortune(1)',
@@ -6662,6 +6661,40 @@ sub do_info($$) {
 	do_stfu($who, -1, $c);
 }
 
+# function : do_klout
+# purpose  : display klout score
+# inputs   : recipient, search term
+
+sub do_klout($$) {
+	my ($who, $user) = @_;
+	my ($score, $query, @topics);
+
+	$user = encode_entities($user);
+
+	$query = $methods{"klout"} . "/$user";
+	$score = "unknown";
+
+	foreach my $line (getContent($query, 0)) {
+		if ($line =~ m/<span class="value">(.*)<\/span>/) {
+			$score = $1;
+			next;
+		}
+		if ($line =~ m/<a class="topic-link".*>(.*)<\/a>/) {
+			push(@topics, $1);
+			next;
+		}
+	}
+	if ($score eq "unknown") {
+		emit($irc, $who, "$user has no klout.");
+	} else {
+		my $infl = " nothing at all.";
+		if (scalar(@topics)) {
+			$infl = ": " . join(", ", @topics);
+		}
+		emit($irc, $who, "$user has a klout score of $score and is influential about$infl");
+	}
+}
+
 
 ###
 ### COMMANDS
@@ -6701,7 +6734,7 @@ print STDERR "$userhost ($real) <->$who $msg\n";
 		do_help($who, $nick, $botnick);
 	}
 
-	elsif (/^8ball(,?\s+.*|$)/) {
+	elsif (/^8ball(,?\s+.*|$)/i) {
 		do_eightball($who, $nick);
 	}
 
@@ -6756,11 +6789,11 @@ print STDERR "$userhost ($real) <->$who $msg\n";
 		do_bugmenot($who, $1);
 	}
 
-	elsif (/^cal(\s+\d+\s+\d+)?$/) {
+	elsif (/^cal(\s+\d+\s+\d+)?$/i) {
 		do_shell("cal $1", $who, "", 7);
 	}
 
-	elsif (/^calc\s+(.*)/) {
+	elsif (/^calc\s+(.*)/i) {
 		my $terms = $1;
 		if ($terms =~ m/(read|while|for|print)/i) {
 			do_quip($who, $nick);
@@ -6890,11 +6923,11 @@ print STDERR "$userhost ($real) <->$who $msg\n";
 		do_shell("/home/y/bin/digest $digest", $who, "$string", 1, 0);
 	}
 
-	elsif (/^errno\s+([a-zA-Z0-9._ -]+)/) {
+	elsif (/^errno\s+([a-zA-Z0-9._ -]+)/i) {
 		do_errno($who, $nick, $1);
 	}
 
-	elsif (/^feature (.*)/) {
+	elsif (/^feature (.*)/i) {
 		if (!is_throttled('mail', $userhost)) {
 			if ($1 =~ "^: unknow") {
 				do_quip($who, $nick);
@@ -6916,7 +6949,7 @@ print STDERR "$userhost ($real) <->$who $msg\n";
 		do_flight($who, $1);
 	}
 
-	elsif (/^(fortune|motd)$/) {
+	elsif (/^(fortune|motd)$/i) {
 		my $fortunes = "20% /home/jans/fortunes/futurama";
 		$fortunes .= " 20% /home/jans/fortunes/calvin";
 		$fortunes .= " 20% /home/jans/fortunes/h2g2";
@@ -6924,15 +6957,15 @@ print STDERR "$userhost ($real) <->$who $msg\n";
 		do_shell("fortune -s $fortunes 20% all", $who, "", 10);
 	}
 
-	elsif (/^foo/) {
+	elsif (/^foo/i) {
 		do_foo($who);
 	}
 
-	elsif (/^futurama/) {
+	elsif (/^futurama/i) {
 		do_futurama($who);
 	}
 
-	elsif (/^fml$/) {
+	elsif (/^fml$/i) {
 		do_fml($who);
 	}
 
@@ -6940,21 +6973,21 @@ print STDERR "$userhost ($real) <->$who $msg\n";
 		do_g($who, $1);
 	}
 
-	elsif (/^gas\s+(\d+)/) {
+	elsif (/^gas\s+(\d+)/i) {
 		do_gas($who, $1);
 	}
 
-	elsif (/^geo(\s+.*|$)/) {
+	elsif (/^geo(\s+.*|$)/i) {
 		my $input = $1;
 		$input =~ s/^\s*//;
 		do_geo($who, $input);
 	}
 
-	elsif (/^help ?(.*)?/) {
+	elsif (/^help ?(.*)?/i) {
 		do_help($who, $nick, $1);
 	}
 
-	elsif (/^how\s+(.*)/) {
+	elsif (/^how\s+(.*)/i) {
 		my ($cmd, $url);
 
 		$cmd = $1;
@@ -6979,15 +7012,15 @@ print STDERR "$userhost ($real) <->$who $msg\n";
 		do_shell("/usr/bin/host $1", $who, "", 7);
 	}
 
-	elsif (/^(img|image)\s+(\S+)/) {
+	elsif (/^(img|image)\s+(\S+)/i) {
 		do_img($who, $2);
 	}
 
-	elsif (/^imdb\s+(.*)/) {
+	elsif (/^imdb\s+(.*)/i) {
 		do_imdb($who, $1);
 	}
 
-	elsif (/^info(\s+\S+)?/) {
+	elsif (/^info(\s+\S+)?/i) {
 		my $c = $1;
 		if (!$c) {
 			$c = $channel;
@@ -7006,7 +7039,7 @@ print STDERR "$1\n";
 		do_ipv4($who, $1);
 	}
 
-	elsif (/^isup\s+(.*)/) {
+	elsif (/^isup\s+(.*)/i) {
 		do_isup($who, $1);
 	}
 
@@ -7014,11 +7047,15 @@ print STDERR "$1\n";
 		emit($irc, $who, "Try: !help, !help $botnick, !how $botnick");
 	}
 
-	elsif (/^leave\s*/) {
+	elsif (/^klout\s+(\S+)/i) {
+		do_klout($who, $1);
+	}
+
+	elsif (/^leave\s*/i) {
 		emit($irc, $channel, "Say \"$botnick, please leave\".");
 	}
 
-	elsif (/^likes?\s+(\S+)\s+(.*)/) {
+	elsif (/^likes?\s+(\S+)\s+(.*)/i) {
 		my $liker = $1;
 		my $stuff = $2;
 		my $str = $like_dislike[int(rand(scalar(@like_dislike)))];
@@ -7026,11 +7063,11 @@ print STDERR "$1\n";
 		emit($irc, $who, "$liker $str");
 	}
 
-	elsif(/^macro\s+(.*)/) {
+	elsif(/^macro\s+(.*)/i) {
 		do_macro($who, uc($1));
 	}
 
-	elsif (/^man\s+(\S+)/) {
+	elsif (/^man\s+(\S+)/i) {
 		if ($1 eq "hfrob") {
 			emit($irc, $who, "hfrob -- frob the hobknobbin good");
 			emit($irc, $who, do_tiny("http://produce.yahoo.com/jans/hfrob.txt"));
@@ -7065,7 +7102,7 @@ print STDERR "$1\n";
 	}
 
 
-	elsif (/([^ ]+)stab (.*)(\s+#\S+)?/) {
+	elsif (/([^ ]+)stab (.*)(\s+#\S+)?/i) {
 		my $kind = $1;
 		my $stabbee = $2;
 		my $target = $3;
@@ -7086,20 +7123,20 @@ print STDERR "$1\n";
 		emit($irc, $target => "Aaaay-ah!");
 	}
 
-	elsif (/^new(\s+.*)?$/) {
+	elsif (/^new(\s+.*)?$/i) {
 		do_new($who, $nick, $1);
 	}
 
-	elsif (/^old$/) {
+	elsif (/^old$/i) {
 		emit($irc, $who, "Your mom.");
 	}
 
-	elsif (/^next\s+(\S+)$/) {
+	elsif (/^next\s+(\S+)$/i) {
 		do_next($who, $1);
 	}
 
 
-	elsif (/^nts\s+(.*)/) {
+	elsif (/^nts\s+(.*)/i) {
 		my $msg = $1;
 		my $email = $userhost;
 		$email =~ s/(.*)@.*/\1/;
@@ -7111,7 +7148,7 @@ print STDERR "$1\n";
 		do_nyt($who, $nick, $1);
 	}
 
-	elsif (/^ohiny$/) {
+	elsif (/^ohiny$/i) {
 		if ($CHANNELS{$channel}{"toggles"}{"nc17"}) {
 			do_ohiny($who);
 		} else {
@@ -7123,7 +7160,7 @@ print STDERR "$1\n";
 		do_onion($who, $nick, $1);
 	}
 
-	elsif (/^primes\s+(\d+)\s+(\d+)/) {
+	elsif (/^primes\s+(\d+)\s+(\d+)/i) {
 		my $min = $1;
 		my $max = $2;
 		my $diff = $max - $min;
@@ -7139,15 +7176,15 @@ print STDERR "$1\n";
 		do_perldoc($who, $1);
 	}
 
-	elsif (/^php\s+([a-zA-Z0-9_.-]+)/) {
+	elsif (/^php\s+([a-zA-Z0-9_.-]+)/i) {
 		do_php($who, $1);
 	}
 
-	elsif (/^ping\s+([a-z0-9_.-]+)/) {
+	elsif (/^ping\s+([a-z0-9_.-]+)/i) {
 		do_ping($who, $1, $channel);
 	}
 
-	elsif (/^pwgen(\s+-s)?(\s+[0-9]+)?$/) {
+	elsif (/^pwgen(\s+-s)?(\s+[0-9]+)?$/i) {
 		my $args = "$1 $2";
 		if ($args !~ m/[0-9]/) {
 			$args .= " 8";
@@ -7155,19 +7192,19 @@ print STDERR "$1\n";
 		do_shell("pwgen $args", $who, "", 1);
 	}
 
-	elsif (/^pydoc\s+([a-zA-Z0-9_.-]+)/) {
+	elsif (/^pydoc\s+([a-zA-Z0-9_.-]+)/i) {
 		do_pydoc($who, $1);
 	}
 
-	elsif (/^quake(\s+us)?$/) {
+	elsif (/^quake(\s+us)?$/i) {
 		do_quake($who, $1);
 	}
 
-	elsif (m/^(q52|rq|ahq)\s+(.+)/) {
+	elsif (m/^(q52|rq|ahq)\s+(.+)/i) {
 		do_quote($who, $1, $2);
 	}
 
-	elsif (/^random\s+(\S+)/) {
+	elsif (/^random\s+(\S+)/i) {
 		my $n = $1;
 		if ($n =~ m/^\d+$/) {
 			emit($irc, $who, int(rand($n)));
@@ -7187,7 +7224,7 @@ print STDERR "Looking for $digest { $hash }...\n";
 		}
 	}
 
-	elsif (/^rev\s+(.+)/) {
+	elsif (/^rev\s+(.+)/i) {
 		my $rev = reverse($1);
 		emit($irc, $who, $rev);
 	}
@@ -7196,22 +7233,22 @@ print STDERR "Looking for $digest { $hash }...\n";
 		do_rfc($who, $1);
 	}
 
-	elsif(/^rosetta\s+([^ ]+) ?([^ ]+)? ?([^ ]+)?/) {
+	elsif(/^rosetta\s+([^ ]+) ?([^ ]+)? ?([^ ]+)?/i) {
 		do_rosetta($who, $1, $2, $3);
 	}
 
-	elsif (/^rotd$/) {
+	elsif (/^rotd$/i) {
 		do_rotd($who);
 	}
 
-	elsif (/^rot13\s+(.+)/) {
+	elsif (/^rot13\s+(.+)/i) {
 		my $rot13 = $1;
 		$rot13 =~ tr[a-zA-Z][n-za-mN-ZA-M];
 
 		emit($irc, $who, $rot13 );
 	}
 
-	elsif (/^rss$/) {
+	elsif (/^rss$/i) {
 		emit($irc, $nick => 'I know about the following RSS feeds:');
 		foreach my $i (sort(keys %rssfeeds)) {
 			emit($irc, $nick => " - " . $rssfeeds{$i} . " [!" . $i . "]");
@@ -7222,7 +7259,7 @@ print STDERR "Looking for $digest { $hash }...\n";
 		do_score($who, $1);
 	}
 
-	elsif (/^seen\s+(\S+)/) {
+	elsif (/^seen\s+(\S+)/i) {
 		my $whom = lc($1);
 		my $msg = $CHANNELS{$channel}{"seen"}{$whom};
 		if (! $msg) {
@@ -7235,11 +7272,11 @@ print STDERR "Looking for $digest { $hash }...\n";
 		emit($irc, $who, $msg);
 	}
 
-	elsif (/^service\s+([a-zA-Z0-9._-]+)/) {
+	elsif (/^service\s+([a-zA-Z0-9._-]+)/i) {
 		do_service($who, $nick, $1);
 	}
 
-	elsif (/^signal\s+([a-zA-Z0-9._-]+)/) {
+	elsif (/^signal\s+([a-zA-Z0-9._-]+)/i) {
 		do_signal($who, $nick, $1);
 	}
 
@@ -7247,15 +7284,15 @@ print STDERR "Looking for $digest { $hash }...\n";
 		do_slashdot($who, $nick, $1);
 	}
 
-	elsif (/^speb$/) {
+	elsif (/^speb$/i) {
 		do_speb($who);
 	}
 
-	elsif (/^snopes\s+(.*)/) {
+	elsif (/^snopes\s+(.*)/i) {
 		do_snopes($who, $1);
 	}
 
-	elsif (/^stfu(\s+\S+)?(\s+#\S+)?$/) {
+	elsif (/^stfu(\s+\S+)?(\s+#\S+)?$/i) {
 		if ($CHANNELS{$channel}{"toggles"}{"stfu"}) {
 			my $chatterer = $1 ? $1 : 3;
 			my $ch = $2 ? $2 : $channel;
@@ -7272,23 +7309,23 @@ print STDERR "Looking for $digest { $hash }...\n";
 		}
 	}
 
-	elsif (/^symbol\s+(.*)/) {
+	elsif (/^symbol\s+(.*)/i) {
 		do_symbol($who, $1);
 	}
 
-	elsif (/^sysexits?\s+([a-zA-Z0-9._-]+)/) {
+	elsif (/^sysexits?\s+([a-zA-Z0-9._-]+)/i) {
 		do_sysexit($who, $nick, $1);
 	}
 
-	elsif (/^stop$/) {
+	elsif (/^stop$/i) {
 		emit($irc, $who, "Hammertime!");
 	}
 
-	elsif (/^thanks/) {
+	elsif (/^thanks/i) {
 		do_thanks($who, $nick);
 	}
 
-	elsif (/^throttle(\s+)?(\S+)?\s*(\S+)?/) {
+	elsif (/^throttle(\s+)?(\S+)?\s*(\S+)?/i) {
 		my $cmd = $2;
 		my $num = $3;
 		if ($cmd) {
@@ -7305,11 +7342,11 @@ print STDERR "Looking for $digest { $hash }...\n";
 		}
 	}
 
-	elsif (/^tiny\s+(.*)/) {
+	elsif (/^tiny\s+(.*)/i) {
 		emit($irc, $who, do_tiny($1));
 	}
 
-	elsif (/^tool\s*(.*)/)  {
+	elsif (/^tool\s*(.*)/i)  {
 		if (!is_throttled('tool', $userhost)) {
 			my $tool = $nick;
 			if ($1 && ($1 ne $botnick)) {
@@ -7357,14 +7394,14 @@ print STDERR "Looking for $digest { $hash }...\n";
 		}
 	}
 
-	elsif (/^top5(g|y(?:e[ln]|sp|dvds|boxoffice|terror|odd|oped|[behorstpvw])?)?(\s+.*)?$/) {
+	elsif (/^top5(g|y(?:e[ln]|sp|dvds|boxoffice|terror|odd|oped|[behorstpvw])?)?(\s+.*)?$/i) {
 		my $cmd = $1;
 		my $word = $2;
 
 		do_top5($who, $cmd, $word);
 	}
 
-	elsif (/^top10 bender/) {
+	elsif (/^top10 bender/i) {
 		do_top5($who, "", "bender");
 		emit($irc, $who, "6. Pimpmobile");
 		emit($irc, $who, "7. Up");
@@ -7373,15 +7410,15 @@ print STDERR "Looking for $digest { $hash }...\n";
 		emit($irc, $who, "10. Chump");
 	}
 
-	elsif (/^traffic\s+(.*)/) {
+	elsif (/^traffic\s+(.*)/i) {
 		do_traffic($who, $nick, $1);
 	}
 
-	elsif (/^trivia$/) {
+	elsif (/^trivia$/i) {
 		do_trivia($who);
 	}
 
-	elsif (/^twitter(\s+.*)?/) {
+	elsif (/^twitter(\s+.*)?/i) {
 		do_twitter($who, $1);
 	}
 
@@ -7389,7 +7426,7 @@ print STDERR "Looking for $digest { $hash }...\n";
 		do_tz($who, $1, $2);
 	}
 
-	elsif (/^ud\s+(.*)/) {
+	elsif (/^ud\s+(.*)/i) {
 		if ($CHANNELS{$channel}{"toggles"}{"nc17"}) {
 			do_ud($who, $1);
 		} else {
@@ -7397,7 +7434,7 @@ print STDERR "Looking for $digest { $hash }...\n";
 		}
 	}
 
-	elsif (/^unthrottle\s+(.*)/) {
+	elsif (/^unthrottle\s+(.*)/i) {
 		my $what = $1;
 		foreach my $word (split(/\s+/, $what)) {
 			foreach my $k ($userhost, "all") {
@@ -7408,21 +7445,21 @@ print STDERR "Looking for $digest { $hash }...\n";
 		}
 	}
 
-	elsif (/^uwotd\s*$/) {
+	elsif (/^uwotd\s*$/i) {
 		fetch_rss_feed("uwotd", $who, 1);
 	}
 
-	elsif (/^uptimes*$/) {
+	elsif (/^uptimes*$/i) {
 		emit($irc, $who, "I've been up since: " .
 			strftime("%a %b %e %H:%M:%S %Z %Y", localtime($^T)));
 		emit($irc, $who, "That's " . get_uptime());
 	}
 
-	elsif (/^usertime\s+([a-z0-9_]+)/) {
+	elsif (/^usertime\s+([a-z0-9_]+)/i) {
 		do_usertime($who, $1);
 	}
 
-	elsif (/^validate\s+(.*)/) {
+	elsif (/^validate\s+(.*)/i) {
 		do_validate($who, $1);
 	}
 
@@ -7442,11 +7479,11 @@ print STDERR "Looking for $digest { $hash }...\n";
 		do_week($who, $1);
 	}
 
-	elsif (/^whois\s+(.*)/) {
+	elsif (/^whois\s+(.*)/i) {
 		do_whois($who, $1);
 	}
 
-	elsif (/^wiki\s+(.*)/) {
+	elsif (/^wiki\s+(.*)/i) {
 		do_wiki($who, $1);
 	}
 
@@ -7454,19 +7491,19 @@ print STDERR "Looking for $digest { $hash }...\n";
 		do_wolfram($who, $1);
 	}
 
-	elsif(/^wotd$/) {
+	elsif(/^wotd$/i) {
 		do_wotd($who);
 	}
 
-	elsif(/^woot$/) {
+	elsif(/^woot$/i) {
 		do_woot($who);
 	}
 
-	elsif (/^wwipind\s+(.*)/) {
+	elsif (/^wwipind\s+(.*)/i) {
 		do_wwipind($who, $1);
 	}
 
-	elsif (/^y?wtf\s+(is )*([a-zA-Z0-9._-]+)/) {
+	elsif (/^y?wtf\s+(is )*([a-zA-Z0-9._-]+)/i) {
 		my $term = lc($2);
 		if (/$botnick/) {
 			emit($irc, $who, "Unfortunately, no one can be told what $botnick is...");
@@ -7561,6 +7598,7 @@ sub do_help($$$)
 			"ipv4"	=>	"!ipv4 (afrinic|apnic|arin|lacnic|ripe) -- display IPv4 allocation for given RIR",
 			"isup"	=>	"!isup <site>       -- check if given site is down for you only",
 			"$botnick" =>	"http://produce.yahoo.com/jans/jbot/",
+			"klout" =>	"!klout <user> -- display a user's klout info",
 			"like"	=>	"!like <somebody> <something> -- provide a guess as to whether somebody likes something or not",
 			"man"	=>	"!man <command>     -- display summary and link for freebsd command",
 			"monkeystab" => "!monkeystab <user> --  unleash a herd of pen wielding stabbing monkeys on the given user",
