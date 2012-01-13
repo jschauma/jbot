@@ -19,6 +19,7 @@ import os
 import random
 import re
 import signal
+import subprocess
 import sys
 import time
 import tweepy
@@ -54,8 +55,10 @@ TWITTER_RESPONSE_STATUS = {
         "FailWhale" : 503
     }
 
+TWSS = "/home/%s/bin/twss.js/bin/twss" % BOTOWNER
+
 NEW = [
-        "!image something"
+        "That's what she said detection."
     ]
 
 ###
@@ -488,6 +491,16 @@ def cmd_tool(msg):
         return "You're a tool, @%s." % tool
 
 
+def cmd_twss(msg, link=None):
+    """Check if given message warrants a 'That's what she said.' response
+
+    twss via https://github.com/DanielRapp/twss.js"""
+
+    # twss returns 0 if it matches, hence 'not':
+    if not subprocess.call([TWSS, "-t", "0.9", msg.text]):
+        return "That's what she said!"
+
+
 def cmd_yourmom(msg, url):
     """Generate a yo-momma joke."""
 
@@ -497,7 +510,7 @@ def cmd_yourmom(msg, url):
         for line in urllib2.urlopen(url).readlines():
             match = pattern.match(line)
             if match:
-                return match.group('yomomma')
+                return dehtmlify(match.group('yomomma'))
 
         sys.stderr.write("Tried to get a yo momma joke from %s but found nothing." % url)
     except urllib2.URLError, e:
@@ -1375,6 +1388,11 @@ MISC_RESPONSES = [
         "And right you are!",
         "Why wouldn't you?",
         "Could you rephrase that?",
+        "I'm sure that wasn't easy for you.",
+        "That's just adorable.",
+        "How nice of you.",
+        "Oh, bugger off."
+        "Good for you. Now make me a sandwich.",
         "Well... duh!"
     ]
 
@@ -1414,6 +1432,9 @@ GOODBYES = [
         "It's a sad day - we've lost %user. Oh well, more jbot for the rest of you."
     ]
 
+## Some commands may not return any results, so that may be ignored.
+IGNORE_EMPTY_COMMANDS = { "cmd_twss" : True }
+
 ##
 ## Regex trigger fall into a number of categories:
 ##
@@ -1426,7 +1447,7 @@ GOODBYES = [
 
 # simple functions triggered by simple regexes
 REGEX_FUNC_TRIGGER = {
-        # new
+        re.compile(".*") : cmd_twss,
         re.compile(".*what's new.*", re.I) : cmd_new,
         re.compile(".*random.*wiki.*", re.I) : randomWikipedia,
         re.compile(".*(dvorak|encode|keyboard layout).*", re.I) : dvorakify,
@@ -1454,7 +1475,7 @@ REGEX_STR_TRIGGER = {
                 "Maroon a Scallywag!"
             ],
         # h2g2
-        re.compile("(arthur dent|slartibartfast|zaphod|beeblebrox|ford prefect|hoopy|trillian|foolproof|my ego|universe|giveaway|lunchtime|bypass|giveaway|don'?t ?panic|new yorker|deadline|potato|grapefruit|don't remember anything|ancestor|make no sense at all|philosophy|apple products)", re.I) : [
+        re.compile("(42|arthur dent|slartibartfast|zaphod|beeblebrox|ford prefect|hoopy|trillian|foolproof|my ego|universe|giveaway|lunchtime|bypass|giveaway|don'?t ?panic|new yorker|deadline|potato|grapefruit|don't remember anything|ancestor|make no sense at all|philosophy|apple products)", re.I) : [
                 "If there's anything more important than my ego around here, I want it caught and shot now!",
                 "I always said there was something fundamentally wrong with the universe.",
                 "Time is an illusion, lunchtime doubly so.",
@@ -1462,6 +1483,16 @@ REGEX_STR_TRIGGER = {
                 "`Oh dear,' says God, `I hadn't thought of  that,' and promptly vanished in a puff of logic.",
                 "It's the first helpful or intelligible thing anybody's said to me all day.",
                 "The last time anybody made a list of the top hundred character attributes of New Yorkers, common sense snuck in at number 79.",
+                "Very deep. You should send that in to the Reader's Digest. They've got a page for people like you.",
+                "I am now a perfectly safe penguin, and my colleague here is rapidly running out of limbs!",
+                "Oh no, not again.",
+                "There was an accident with a contraceptive and a time machine.",
+                "You're so weird you should be in movies.",
+                "Do people want fire that can be fitted nasally?",
+                "Once you know what it is you want to be true, instinct is a very useful device for enabling you to know that it is.",
+                "Don't give any money to the unicorns, it only encourages them.",
+                "Think before you pluck. Irresponsible plucking costs lives.",
+                "My doctor says that I have a malformed public-duty gland and a natural deficiency in moral fibre.",
                 "I love deadlines. I like the whooshing sound they make as they fly by.",
                 "It is a mistake to think you can solve any major problem just with potatoes.",
                 "Life... is like a grapefruit. It's orange and squishy, and has a few pips in it, and some folks have half a one for breakfast.",
@@ -1666,7 +1697,8 @@ class Jbot(object):
 
         def __init__(self, rval):
             self.err = rval
-            self.msg = 'Usage: %s [-hv] [-u user]\n' % os.path.basename(sys.argv[0])
+            self.msg = 'Usage: %s [-dhv] [-u user]\n' % os.path.basename(sys.argv[0])
+            self.msg += '\t-d          run in debug mode\n'
             self.msg += '\t-h          print this message and exit\n'
             self.msg += '\t-u user     run as this user\n'
             self.msg += '\t-v          increase verbosity\n'
@@ -1913,14 +1945,14 @@ class Jbot(object):
                 continue
             try:
                 if action == "follow":
-                    reply = GREETINGS[random.randint(0,len(GREETINGS)-1)]
-                    reply = re.sub(r'%user', "@%s" % u, reply)
-                    self.tweet(reply)
+#                    reply = GREETINGS[random.randint(0,len(GREETINGS)-1)]
+#                    reply = re.sub(r'%user', "@%s" % u, reply)
+#                    self.tweet(reply)
                     self.api.create_friendship(screen_name=u)
                 elif action == "unfollow":
-                    reply = GOODBYES[random.randint(0,len(GOODBYES)-1)]
-                    reply = re.sub(r'%user', "@%s" % u, reply)
-                    self.tweet(reply)
+#                    reply = GOODBYES[random.randint(0,len(GOODBYES)-1)]
+#                    reply = re.sub(r'%user', "@%s" % u, reply)
+#                    self.tweet(reply)
                     self.api.destroy_friendship(screen_name=u)
                 else:
                     sys.stderr.write("Illegal action for 'followOrUnfollow': %s\n" % action)
@@ -2269,7 +2301,8 @@ class Jbot(object):
                 self.tweet(response, id)
                 return True
             else:
-                sys.stderr.write("Called %s but got nothing...\n" % func.__name__)
+                if not IGNORE_EMPTY_COMMANDS.has_key(func.__name__):
+                    sys.stderr.write("Called %s but got nothing...\n" % func.__name__)
         else:
             sys.stderr.write("Unable to call %s?\n" % func.__name__)
 
@@ -2337,7 +2370,7 @@ class Jbot(object):
             if len(gone_followers) == len(self.api_followers):
                 sys.stderr.write("All followers gone?\n")
                 sys.exit(EXIT_ERROR)
-            elif len(gone_followers) > 5:
+            elif len(gone_followers) > 25:
                 sys.stderr.write("Suspiciously large lost followers: %d\n" % len(gone_followers))
                 sys.exit(EXIT_ERROR)
             self.followOrUnfollow("unfollow", gone_followers)
