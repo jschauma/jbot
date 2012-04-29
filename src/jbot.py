@@ -293,13 +293,13 @@ def cmd_geoip(msg, url):
 
     txt = msg.text
     # Yeah, yeah, yeah, this is not an IP.  I know.
-    pattern = re.compile('.*!geoip.*(?P<ip>\d+\.\d+\.\d+\.\d+).*')
+    pattern = re.compile('.*!geoip\s+(?P<ip>\d+\.\d+\.\d+\.\d+).*')
     match = pattern.match(txt)
     if match:
         ip = match.group('ip')
         url = "%s%s" % (url, ip)
         try:
-            result = "@%s " % msg.user.screen_name
+            result = "@%s %s seems to be in " % (msg.user.screen_name, ip)
             for line in urllib2.urlopen(url).readlines():
                 data = json.loads(line)
                 result += "%s, %s, %s" % (data['city'], data['region_name'], data['country_name'])
