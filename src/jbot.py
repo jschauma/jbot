@@ -15,6 +15,7 @@ import datetime
 import fcntl
 import getopt
 import htmlentitydefs
+import json
 import os
 import random
 import re
@@ -142,31 +143,32 @@ def cmd_better(msg, url):
     terms = {}
     input = msg.text.replace("@%s !better " % BOTNAME, "")
     for term in input.split(" or ", 1):
-        turl = "%squery?%s" % (url, urllib.urlencode({'term':term}))
-        pattern = re.compile('{"term": .* "sucks": (?P<sucks>\d+), "rocks": (?P<rocks>\d+)}', re.I)
-        try:
-            for line in urllib2.urlopen(turl).readlines():
-                match = pattern.match(line)
-                if match:
-                    s = float(match.group('sucks'))
-                    r = float(match.group('rocks'))
-                    if (r == 0):
-                        terms[term] = 0.0
-                    else:
-                        terms[term] = float(10 - ((s/(s + r)) * 10))
-        except urllib2.URLError, e:
-            sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
-
-    if len(terms) != 2:
-        return "@%s Sorry, I can't parse that as a valid '!better' request - please try again." % msg.user.screen_name
-    else:
-        tkeys = terms.keys()
-        if terms[tkeys[0]] == terms[tkeys[1]]:
-            return "@%s Pretty much the same, I'd say. I guess you'd like %s better." % \
-                            (msg.user.screen_name, tkeys[random.randint(0,len(tkeys)-1)])
-        else:
-            # sorting yields a list of key=>val pairs sorted by val
-            response = sorted(terms.iteritems(), key=lambda (k,v): (k,v))[0][0]
+        terms[term] = 0.0
+#        turl = "%squery?%s" % (url, urllib.urlencode({'term':term}))
+#        pattern = re.compile('{"term": .* "sucks": (?P<sucks>\d+), "rocks": (?P<rocks>\d+)}', re.I)
+#        try:
+#            for line in urllib2.urlopen(turl).readlines():
+#                match = pattern.match(line)
+#                if match:
+#                    s = float(match.group('sucks'))
+#                    r = float(match.group('rocks'))
+#                    if (r == 0):
+#                        terms[term] = 0.0
+#                    else:
+#                        terms[term] = float(10 - ((s/(s + r)) * 10))
+#        except urllib2.URLError, e:
+#            sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+#
+#    if len(terms) != 2:
+#        return "@%s Sorry, I can't parse that as a valid '!better' request - please try again." % msg.user.screen_name
+#    else:
+#        tkeys = terms.keys()
+#        if terms[tkeys[0]] == terms[tkeys[1]]:
+#            return "@%s Pretty much the same, I'd say. I guess you'd like %s better." % \
+#                            (msg.user.screen_name, tkeys[random.randint(0,len(tkeys)-1)])
+#        else:
+#            # sorting yields a list of key=>val pairs sorted by val
+#            response = sorted(terms.iteritems(), key=lambda (k,v): (k,v))[0][0]
 
     snarkisms = [ "Clearly: <t>",
                     "<t> - duh.",
@@ -175,8 +177,9 @@ def cmd_better(msg, url):
                     "<t> is much better, if you ask me.",
                     "Hmmm... <t>, perhaps?",
                     "I'm gonna go ahead and say: <t>" ]
+    tkeys = terms.keys()
     phrase = snarkisms[random.randint(0,len(snarkisms)-1)]
-    return "@%s %s" % (msg.user.screen_name, phrase.replace("<t>", response))
+    return "@%s %s" % (msg.user.screen_name, phrase.replace("<t>", tkeys[random.randint(0, len(tkeys)-1)]))
 
 
 def cmd_brick(msg, url=None):
@@ -283,6 +286,31 @@ def cmd_flickr(msg):
         encoded = base58[num] + encoded
 
     return "%shttp://flic.kr/p/%s" % (prefix, encoded)
+
+
+def cmd_geoip(msg, url):
+    """Return the location and a link to the map of the first IP found in the message."""
+
+    txt = msg.text
+    # Yeah, yeah, yeah, this is not an IP.  I know.
+    pattern = re.compile('.*!geoip.*(?P<ip>\d+\.\d+\.\d+\.\d+).*')
+    match = pattern.match(txt)
+    if match:
+        ip = match.group('ip')
+        url = "%s%s" % (url, ip)
+        try:
+            result = "@%s " % msg.user.screen_name
+            for line in urllib2.urlopen(url).readlines():
+                data = json.loads(line)
+                result += "%s, %s, %s" % (data['city'], data['region_name'], data['country_name'])
+                lat = data['latitude']
+                long = data['longitude']
+                result += "\nhttps://maps.google.com/maps?q=%s,+%s" % (lat, long)
+                return result
+
+        except urllib2.URLError, e:
+            sys.stderr.write("Unable to get %s\n\t%s\n" % (url, e))
+
 
 
 def cmd_help(msg):
@@ -497,7 +525,7 @@ def cmd_twss(msg, link=None):
     twss via https://github.com/DanielRapp/twss.js"""
 
     # twss returns 0 if it matches, hence 'not':
-    if not subprocess.call([TWSS, "-t", "0.9", msg.text]):
+    if not subprocess.call([TWSS, "-t", "0.999", str(msg.text)]):
         return "That's what she said!"
 
 
@@ -1006,6 +1034,9 @@ COMMANDS = {
     "flic.kr" : Command("flic.kr", cmd_flickr,
                         "<long flickr URL>", "turn a long flickr URL into a short flic.kr URL",
                         "base_58 conversion", "Tweet"),
+    "geoip"   : Command("geoip", cmd_geoip,
+                        "<ip>", "return the location of the given IP",
+                        "http://freegeoip.net/json/", "URL"),
     "help"    : Command("help", cmd_help,
                         "(<command>)", "request help (about the given command)",
                         "hardcoded", "Tweet"),
@@ -1380,7 +1411,7 @@ MISC_RESPONSES = [
         "You're not making any sense.",
         "As you can imagine, I'm very sympathetic to this issue.",
         "I understand.",
-        "I don't understand."
+        "I don't understand.",
         "Are you a robot?",
         "Oh come ON!",
         "I'm gonna go ahead and say... no.",
@@ -1432,7 +1463,8 @@ GOODBYES = [
         "It's a sad day - we've lost %user. Oh well, more jbot for the rest of you."
     ]
 
-## Some commands may not return any results, so that may be ignored.
+## Some commands may not return any results; don't generate error messages
+## for those.
 IGNORE_EMPTY_COMMANDS = { "cmd_twss" : True }
 
 ##
@@ -1447,7 +1479,7 @@ IGNORE_EMPTY_COMMANDS = { "cmd_twss" : True }
 
 # simple functions triggered by simple regexes
 REGEX_FUNC_TRIGGER = {
-        re.compile(".*") : cmd_twss,
+#        re.compile(".*") : cmd_twss,
         re.compile(".*what's new.*", re.I) : cmd_new,
         re.compile(".*random.*wiki.*", re.I) : randomWikipedia,
         re.compile(".*(dvorak|encode|keyboard layout).*", re.I) : dvorakify,
@@ -1643,7 +1675,7 @@ REGEX_URL_TRIGGER = {
                         ( cmd_schneier, "http://www.schneierfacts.com/" ),
         re.compile(".*(trivia|factual|factlet)", re.I) :
                         ( cmd_trivia, "http://www.nicefacts.com/quickfacts/index.php" ),
-        re.compile("(shakespear|hamlet|macbeth|romeo and juliet|merchant of venice|midsummer nicht's dream|henry V|as you like it|All's Well That Ends Well|Comedy of Errors|Cymbeline|Love's Labours Lost|Measure for Measure|Merry Wives of Windsor|Much Ado About Nothing|Pericles|Prince of Tyre|Taming of the Shrew|Tempest|Troilus|Cressida|Twelfth Night|two gentleman of verona|Winter's tale|henry IV|king john|richard II|antony and cleopatra|coriolanus|julius caesar|kind lear|othello|timon of athens|titus|andronicus)", re.I) :
+        re.compile("(shakespear|hamlet|Coriolanus|macbeth|romeo and juliet|merchant of venice|midsummer nicht's dream|henry V|as you like it|All's Well That Ends Well|Comedy of Errors|Cymbeline|Love's Labours Lost|Measure for Measure|Merry Wives of Windsor|Much Ado About Nothing|Pericles|Prince of Tyre|Taming of the Shrew|Tempest|Troilus|Cressida|Twelfth Night|two gentleman of verona|Winter's tale|henry IV|king john|richard II|antony and cleopatra|coriolanus|julius caesar|kind lear|othello|timon of athens|titus|andronicus)", re.I) :
                         ( cmd_shakespear, "http://www.pangloss.com/seidel/Shaker/index.html" ),
         re.compile("(chuck|norris|walker|texas ranger|karate)", re.I) :
                         ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=chuck" ),
@@ -1653,7 +1685,7 @@ REGEX_URL_TRIGGER = {
                         ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=vin" ),
         re.compile("(ur([ _])mom|yourmom|m[oa]mma|[^ ]+'s mom)", re.I) :
                         ( cmd_yourmom, "http://www.ahajokes.com" ),
-        re.compile("(bug|insect|fly|roach|spider|grasshopper)", re.I) :
+        re.compile("(bug|insect|roach|spider|grasshopper)", re.I) :
                         ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/bugs" ),
         re.compile("\b(animal|cat|dog|horse|mammal|cow|chicken|lobster|bear)", re.I) :
                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/animals" ),
