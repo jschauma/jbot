@@ -1,0 +1,75 @@
+This is a HipChat version of the 'jbot' IRC bot,
+originally "developed" at Yahoo! in 2007.  This
+variant was created as a rewrite in Go for HipChat
+in July 2016 by Jan Schaumann (@jschauma /
+jschauma@netmeister.org).  Many thanks to Yahoo for
+letting me play around with nonsense like this.
+
+You should be able to run the bot by populating a
+configuration file with suitable values.  The
+following configuration values are required:
+   password = the HipChat password of the bot user
+   jabberID = the HipChat / JabberID of the bot user
+   fullName = how the bot presents itself
+   mentionName = to which name the bot responds to
+
+This bot has a bunch of features that are company
+internal; those features have been removed from
+this public version.
+
+Some day this should be extended into a pluggable
+bot, so that internal code can more easily be kept
+apart, I suppose.  Pull requests welcome etc.
+
+
+Some of the URLs used by the bot reference simple text
+documents hosted on an internal server.  This is so as
+to not rely on outside resources and their flimsy
+markups as well as to control the contents somewhat.
+You can grep the sources for 'XXX' and replace the
+URLs with a link to a location you control.  (This,
+too, could be improved to be configurable.)
+
+---
+
+Interacting with the bot:
+
+Getting jbot to join your channel:
+
+/invite jbot
+
+Getting jbot to leave your channel:
+
+!leave
+
+
+jbot responds to:
+- commands invoked via '!command' -- see '!help'
+- commands invoked via @-mentioning the bot:
+  !command     => "@jbot command"
+  !command arg => "@jbot command arg"
+
+If 'chatter' is not toggled off (it is on by default),
+jbot will also:
+- reply to any statement that is addressed to it:
+  How are you today, jbot?
+  jbot, you suck
+
+- chime in with certain semi-random replies (sure, you
+  got the source, but the fun part is figuring out
+  what triggers what type of response); some of these
+  responses are throttled to avoid too repetitive
+  annoyances
+
+---
+
+Requirements:
+	- Go 1.3
+
+Installation:
+	- go build jbot.go
+	- install -c -m 755 jbot /somewhere/in/your/path/jbot
+
+Questions/comments:
+	jschauma@netmeister.org
+	https://twitter.com/jschauma
