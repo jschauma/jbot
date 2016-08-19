@@ -548,6 +548,37 @@ func cmdQuote(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdRfc(r Recipient, chName, args string) (result string) {
+	rfcs := strings.Split(args, " ")
+	if len(rfcs) != 1 {
+		result = "Usage: " + COMMANDS["rfc"].Usage
+		return
+	}
+
+	rfc := strings.ToLower(strings.TrimSpace(rfcs[0]))
+
+	if !strings.HasPrefix(rfc, "rfc") {
+		rfc = "rfc" + rfc
+	}
+
+	theUrl := fmt.Sprintf("%s%s", COMMANDS["rfc"].How, rfc)
+	data := getURLContents(theUrl, false)
+
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "<span class=\"h1\">") {
+			result = dehtmlify(line)
+		}
+	}
+
+	if len(result) > 0 {
+		result += "\n" + theUrl
+	} else {
+		result = "No such RFC."
+	}
+
+	return
+}
+
 func cmdSeen(r Recipient, chName, args string) (result string) {
 	wanted := strings.Split(args, " ")
 	user := wanted[0]
@@ -886,7 +917,6 @@ func argcheck(flag string, args []string, i int) {
 }
 
 func catchPanic() {
-	serializeData()
 	if r := recover(); r != nil {
 		fmt.Fprintf(os.Stderr, "Panic!\n%s\n", r)
 		debug.PrintStack()
@@ -1008,7 +1038,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Who for example?",
 			"Can you think of anybody in particular?",
 		},
-		regexp.MustCompile(`(?i)(where|how|when|why|what|who|which).*\?$`): []string{
+		regexp.MustCompile(`(?i)(where|when|why|what|who|which).*\?$`): []string{
 			"How the hell am I supposed to know that?",
 			"FIIK",
 			"ENOCLUE",
@@ -1035,7 +1065,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 		}
 	}
 
-	result = randomLineFromUrl("https://SOME-LINK-WITH-WITTY-REPLIES-HERE", true)
+	result = randomLineFromUrl("https://XXX-SOME-LINK-WITH-WITTY-REPLIES-HERE-XXX", true)
 	return
 }
 
@@ -1312,6 +1342,11 @@ func createCommands() {
 		"https://query.yahooapis.com/v1/public/yql",
 		"!quote <symbol>",
 		[]string{"stock"}}
+	COMMANDS["rfc"] = &Command{cmdRfc,
+		"display title and URL of given RFC",
+		"https://tools.ietf.org/html/",
+		"!rfc <rfc>",
+		nil}
 	COMMANDS["seen"] = &Command{cmdSeen,
 		"show last time <user> was seen in <channel>",
 		"builtin",
@@ -1602,6 +1637,22 @@ func isThrottled(throttle string, ch *Channel) (is_throttled bool) {
 	return
 }
 
+func leave(client *hipchat.Client, r Recipient, channelFound bool, msg string, command bool) {
+	verbose(fmt.Sprintf("%s asked us to leave %s.", r.Name, r.ReplyTo), 4)
+	if !command && !strings.Contains(msg, "please") {
+		reply(client, r, "Please ask politely.")
+		return
+	}
+
+	if channelFound {
+		client.Part(r.Jid, CONFIG["fullName"])
+		delete(CHANNELS, r.ReplyTo)
+	} else {
+		reply(client, r, "Try again from a channel I'm in.")
+	}
+	return
+}
+
 func parseConfig() {
 	fname := CONFIG["configFile"]
 	verbose(fmt.Sprintf("Parsing config file '%s'...", fname), 1)
@@ -1668,6 +1719,12 @@ func processChatter(client *hipchat.Client, r Recipient, msg string, forUs bool)
 		forUs = direct_re.MatchString(msg)
 	}
 
+	leave_re := regexp.MustCompile(fmt.Sprintf("(?i)^((@?%s[,:]? )(please )?leave)|(please )?leave[,:]? @?%s", CONFIG["mentionName"], CONFIG["mentionName"]))
+	if leave_re.MatchString(msg) {
+		leave(client, r, found, msg, false)
+		return
+	}
+
 	/* 'forUs' tells us if a message was
 	 * specifically directed at us via ! or @jbot;
 	 * these do not require a 'chatter' toggle to
@@ -1732,6 +1789,7 @@ func processChatter(client *hipchat.Client, r Recipient, msg string, forUs bool)
 }
 
 func processCommands(client *hipchat.Client, r Recipient, invocation, line string) {
+	defer catchPanic()
 	verbose(fmt.Sprintf("#%s: '%s'", r.ReplyTo, line), 4)
 
 	args := strings.Fields(line)
@@ -1750,13 +1808,7 @@ func processCommands(client *hipchat.Client, r Recipient, invocation, line strin
 	 * to be processed first. */
 	leave_re := regexp.MustCompile(`(please )?leave(,? please)?`)
 	if leave_re.MatchString(line) {
-		verbose(fmt.Sprintf("%s asked us to leave %s.", r.Name, r.ReplyTo), 4)
-		if channelFound {
-			client.Part(r.Jid, CONFIG["fullName"])
-			delete(CHANNELS, r.ReplyTo)
-		} else {
-			reply(client, r, "Try again from a channel I'm in.")
-		}
+		leave(client, r, channelFound, line, true)
 		return
 	}
 
