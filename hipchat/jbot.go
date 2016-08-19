@@ -139,6 +139,42 @@ type Recipient struct {
  * Commands
  */
 
+func cmdAsn(r Recipient, chName, args string) (result string) {
+	input := strings.Split(args, " ")
+	if len(args) < 1 || len(input) != 1 {
+		result = "Usage: " + COMMANDS["asn"].Usage
+		return
+	}
+
+	arg := input[0]
+	number_re := regexp.MustCompile(`(?i)^(asn?)?([0-9]+)$`)
+	m := number_re.FindStringSubmatch(arg)
+	if len(m) > 0 {
+		arg = "AS" + m[2]
+	} else if net.ParseIP(arg) == nil {
+		arg = fqdn(arg)
+		addrs, err := net.LookupHost(arg)
+		if err != nil {
+			result = "Not a valid ASN, IP or hostname."
+			return
+		}
+		arg = addrs[0]
+	}
+
+	command := strings.Fields(COMMANDS["asn"].How)
+	command = append(command, arg)
+
+	data, _ := runCommand(command...)
+	lines := strings.Split(string(data), "\n")
+	if len(lines) < 2 {
+		result = "No ASN information found."
+	} else {
+		result = lines[len(lines)-2]
+	}
+
+	return
+}
+
 func cmdChannels(r Recipient, chName, args string) (result string) {
 	var channels []string
 
@@ -567,6 +603,7 @@ func cmdRfc(r Recipient, chName, args string) (result string) {
 	for _, line := range strings.Split(string(data), "\n") {
 		if strings.Contains(line, "<span class=\"h1\">") {
 			result = dehtmlify(line)
+			break
 		}
 	}
 
@@ -1282,6 +1319,11 @@ func createCommands() {
 		"builtin",
 		"!8ball <question>",
 		nil}
+	COMMANDS["asn"] = &Command{cmdAsn,
+		"display information about ASN",
+		"whois -h whois.cymru.com",
+		"!asn [<host>|<ip>|<asn>)",
+		nil}
 	COMMANDS["channels"] = &Command{cmdChannels,
 		"display channels I'm in",
 		"builtin",
@@ -1306,7 +1348,7 @@ func createCommands() {
 		"display this help",
 		"builtin",
 		"!help [all|<command>]",
-		[]string{"commands"}}
+		[]string{"?", "commands"}}
 	COMMANDS["host"] = &Command{cmdHost,
 		"host lookup",
 		"host(1)",
@@ -1790,9 +1832,12 @@ func processChatter(client *hipchat.Client, r Recipient, msg string, forUs bool)
 
 func processCommands(client *hipchat.Client, r Recipient, invocation, line string) {
 	defer catchPanic()
-	verbose(fmt.Sprintf("#%s: '%s'", r.ReplyTo, line), 4)
+	verbose(fmt.Sprintf("#%s: '%s'", r.ReplyTo, line), 2)
 
 	args := strings.Fields(line)
+	if len(args) < 1 {
+		return
+	}
 	cmd := strings.ToLower(args[0])
 	if cmd == strings.ToLower(CONFIG["mentionName"]) && len(args) > 0 {
 		cmd = args[1]
@@ -1859,7 +1904,7 @@ func processInvite(client *hipchat.Client, r Recipient, invite string) {
 		ch.Toggles[t] = v
 	}
 
-	verbose(fmt.Sprintf("I was invited into '%s' (%s) by '%s'.", channelName, r.Jid, from), 3)
+	verbose(fmt.Sprintf("I was invited into '%s' (%s) by '%s'.", channelName, r.Jid, from), 2)
 	CHANNELS[channelName] = &ch
 	verbose(fmt.Sprintf("Joining #%s...", ch.Name), 1)
 	client.Join(r.Jid, CONFIG["fullName"])
@@ -1936,11 +1981,21 @@ func reply(client *hipchat.Client, r Recipient, msg string) {
 
 }
 
-func runCommand(cmd string) (out []byte, rval int) {
-	rval = 0
-	argv := strings.Split(cmd, " ")
+func runCommand(cmd ...string) (out []byte, rval int) {
+	var argv []string
+
+	if len(cmd) == 0 {
+		return
+	}
+
+	if len(cmd) == 1 {
+		argv = strings.Split(cmd[0], " ")
+	} else {
+		argv = cmd
+	}
 	command := exec.Command(argv[0], argv[1:]...)
 
+	rval = 0
 	verbose(fmt.Sprintf("Exec'ing '%s'...", argv), 3)
 
 	go func() {
@@ -2054,6 +2109,7 @@ func wasInsult(msg string) (result bool) {
 	result = false
 
 	var insultPatterns = []*regexp.Regexp{
+		regexp.MustCompile(fmt.Sprintf("(?i)fu[, ]@?%s", CONFIG["mentionName"])),
 		regexp.MustCompile("(?i)dam+n? (yo)?u"),
 		regexp.MustCompile("(?i)shut ?(the fuck )?up"),
 		regexp.MustCompile("(?i)(screw|fuck) (yo)u"),
