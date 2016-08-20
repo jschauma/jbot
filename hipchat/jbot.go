@@ -324,6 +324,25 @@ func cmdEightBall(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdFml(r Recipient, chName, args string) (result string) {
+	if len(args) > 1 {
+		result = "Usage: " + COMMANDS["fml"].Usage
+		return
+	}
+
+	data := getURLContents(COMMANDS["fml"].How, false)
+
+	fml_re := regexp.MustCompile(`(?i)>(Today, .*FML)<`)
+	for _, line := range strings.Split(string(data), "\n") {
+		m := fml_re.FindStringSubmatch(line)
+		if len(m) > 0 {
+			result = dehtmlify(m[1])
+			return
+		}
+	}
+	return
+}
+
 func cmdFortune(r Recipient, chName, args string) (result string) {
 	if len(args) > 1 {
 		result = "Usage: " + COMMANDS["fortune"].Usage
@@ -695,6 +714,24 @@ func cmdStfu(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdTfln(r Recipient, chName, args string) (result string) {
+	if len(args) > 1 {
+		result = "Usage: " + COMMANDS["tfln"].Usage
+		return
+	}
+
+	data := getURLContents(COMMANDS["tfln"].How, false)
+
+	tfln_re := regexp.MustCompile(`(?i)^<p><a href="/Text-Replies`)
+	for _, line := range strings.Split(string(data), "\n") {
+		if tfln_re.MatchString(line) {
+			result = dehtmlify(line)
+			return
+		}
+	}
+	return
+}
+
 func cmdThrottle(r Recipient, chName, args string) (result string) {
 	input := strings.Split(args, " ")
 	if len(input) > 2 {
@@ -749,6 +786,62 @@ func cmdThrottle(r Recipient, chName, args string) (result string) {
 	}
 	sort.Strings(throttles)
 	result += strings.Join(throttles, ", ")
+	return
+}
+
+func cmdTld(r Recipient, chName, args string) (result string) {
+	input := strings.Fields(args)
+	if len(args) < 1 || len(input) != 1 {
+		result = "Usage: " + COMMANDS["tld"].Usage
+		return
+	}
+
+	domain := input[0]
+
+	if strings.HasPrefix(domain, ".") {
+		domain = domain[1:]
+	}
+
+	command := strings.Fields(COMMANDS["tld"].How)
+	command = append(command, domain)
+
+	data, _ := runCommand(command...)
+
+	info := map[string]string{}
+
+	found := false
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "domain:") {
+			found = true
+		}
+		if found && strings.Contains(line, ":") {
+			fields := strings.SplitN(line, ": ", 2)
+			if _, found := info[fields[0]]; !found {
+				info[fields[0]] = strings.TrimSpace(fields[1])
+			}
+		}
+	}
+	if len(info) < 1 {
+		result = fmt.Sprintf("No such TLD: '%s'", domain)
+	} else {
+		if len(info["organisation"]) > 0 {
+			result =  fmt.Sprintf("Organization: %s\n", info["organisation"])
+		}
+		if len(info["e-mail"]) > 0 {
+			result += fmt.Sprintf("Contact     : %s\n", info["e-mail"])
+		}
+		if len(info["e-mail"]) > 0 {
+			result += fmt.Sprintf("Contact     : %s\n", info["e-mail"])
+		}
+		if len(info["whois"]) > 0 {
+			result += fmt.Sprintf("Whois       : %s\n", info["whois"])
+		}
+		result += fmt.Sprintf("Status      : %s\n", info["status"])
+		result += fmt.Sprintf("Created     : %s\n", info["created"])
+		if len(info["remarks"]) > 0 {
+			result += fmt.Sprintf("URL         : %s\n", strings.Replace(info["remarks"], "Registration information: ", "", -1))
+		}
+	}
 	return
 }
 
@@ -1339,6 +1432,11 @@ func createCommands() {
 		"https://cve.mitre.org/cgi-bin/cvename.cgi?name=",
 		"!cve <cve-id>",
 		nil}
+	COMMANDS["fml"] = &Command{cmdFml,
+		"display a quote from www.fmylife.com",
+		"http://www.fmylife.com/random",
+		"!fml",
+		nil}
 	COMMANDS["fortune"] = &Command{cmdFortune,
 		"print a random, hopefully interesting, adage",
 		"fortune(1)",
@@ -1405,6 +1503,11 @@ func createCommands() {
 		"builtin",
 		"!stfu [<user>]",
 		nil}
+	COMMANDS["tfln"] = &Command{cmdTfln,
+		"display a text from last night",
+		"http://www.textsfromlastnight.com/Random-Texts-From-Last-Night.html",
+		"!tfln",
+		nil}
 	COMMANDS["throttle"] = &Command{cmdThrottle,
 		"show current throttles",
 		"builtin",
@@ -1412,6 +1515,11 @@ func createCommands() {
 			fmt.Sprintf("!throttle <something>  -- set throttle for <something> to %g seconds\n", DEFAULT_THROTTLE) +
 			"!throttle <something> <seconds> -- set throttle for <something> to <seconds>\n" +
 			"Note: I will happily let you set throttles I don't know or care about.",
+		nil}
+	COMMANDS["tld"] = &Command{cmdTld,
+		"show what TLD is",
+		"whois -h whois.iana.org",
+		"!tld <tld>",
 		nil}
 	COMMANDS["toggle"] = &Command{cmdToggle,
 		"toggle a feature",
@@ -1545,6 +1653,7 @@ func getopts() {
 		switch arg {
 		case "-D":
 			CONFIG["debug"] = "yes"
+			VERBOSITY = 10
 		case "-V":
 			printVersion()
 			os.Exit(EXIT_SUCCESS)
@@ -1680,7 +1789,7 @@ func isThrottled(throttle string, ch *Channel) (is_throttled bool) {
 }
 
 func leave(client *hipchat.Client, r Recipient, channelFound bool, msg string, command bool) {
-	verbose(fmt.Sprintf("%s asked us to leave %s.", r.Name, r.ReplyTo), 4)
+	verbose(fmt.Sprintf("%s asked us to leave %s.", r.Name, r.ReplyTo), 2)
 	if !command && !strings.Contains(msg, "please") {
 		reply(client, r, "Please ask politely.")
 		return
@@ -2068,6 +2177,10 @@ func updateSeen(r Recipient, msg string) {
 				break
 			}
 		}
+		if u == nil {
+			return
+		}
+
 		uInfo.Seen = fmt.Sprintf(time.Now().Format(time.UnixDate))
 
 		for _, curse := range curses_match {
