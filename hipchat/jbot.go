@@ -10,6 +10,7 @@
  * configuration file with suitable values.  The
  * following configuration values are required:
  *   password = the HipChat password of the bot user
+ *   hcName   = the HipChat company prefix, e.g. <foo>.hipchatcom
  *   jabberID = the HipChat / JabberID of the bot user
  *   fullName = how the bot presents itself
  *   mentionName = to which name the bot responds to
@@ -63,6 +64,7 @@ import (
 )
 
 const DEFAULT_THROTTLE = 1800
+const PERIODICS = 1800
 
 const EXIT_FAILURE = 1
 const EXIT_SUCCESS = 0
@@ -77,15 +79,19 @@ var CONFIG = map[string]string{
 	"domain":       "conf.hipchat.com",
 	"domainPrefix": "",
 	"fullName":     "",
+	"hcName":       "",
 	"jabberID":     "",
 	"mentionName":  "",
 	"password":     "",
 	"user":         "",
 }
 
+var HIPCHAT_CLIENT *hipchat.Client
+
 var CHANNELS = map[string]*Channel{}
 var CURSES = map[string]int{}
 var COMMANDS = map[string]*Command{}
+var ROOMS = map[string]*hipchat.Room{}
 var ROSTER = map[string]*hipchat.User{}
 
 var TOGGLES = map[string]bool{
@@ -603,6 +609,67 @@ func cmdQuote(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdRoom(r Recipient, chName, args string) (result string) {
+	if len(args) < 1 {
+		result = "Usage: " + COMMANDS["room"].Usage
+		return
+	}
+
+	room := strings.TrimSpace(args)
+	candidates := []*hipchat.Room{}
+
+	for _, aRoom := range ROOMS {
+		if aRoom.Name == room || aRoom.RoomId == room {
+			result = fmt.Sprintf("'%s' (%s)\n", aRoom.Name, aRoom.Privacy)
+			result += fmt.Sprintf("Topic: %s\n", aRoom.Topic)
+
+			owner := strings.Split(aRoom.Owner, "@")[0]
+			if u, found := ROSTER[owner]; found {
+				result += fmt.Sprintf("Owner: %s\n", u.MentionName)
+			}
+
+			if aRoom.LastActive != "" {
+				result += fmt.Sprintf("Last Active: %s\n", aRoom.LastActive)
+			}
+
+			if aRoom.NumParticipants != "0" {
+				result += fmt.Sprintf("Hip Chatters: %s\n", aRoom.NumParticipants)
+			}
+			result += fmt.Sprintf("https://%s.hipchat.com/history/room/%s\n", CONFIG["hcName"], aRoom.RoomId)
+			return
+		} else {
+			lc := strings.ToLower(aRoom.Name)
+			lroom := strings.ToLower(room)
+			if strings.Contains(lc, lroom) {
+				candidates = append(candidates, aRoom)
+			}
+		}
+	}
+
+	if len(candidates) > 0 {
+		result = "No room with that exact name found.\n"
+		if len(candidates) > 1 {
+			result += "Some possible candidates might be:\n"
+		} else {
+			result += "Did you mean:\n"
+		}
+		for i, aRoom := range candidates {
+			if i > 6 {
+				result += "..."
+				break
+			}
+			result += fmt.Sprintf("%s - %s\n", aRoom.Name, aRoom.Topic)
+		}
+	}
+
+	if len(result) < 1 {
+		HIPCHAT_CLIENT.RequestRooms()
+		result = "No such room: " + room
+	}
+
+	return
+}
+
 func cmdRfc(r Recipient, chName, args string) (result string) {
 	rfcs := strings.Split(args, " ")
 	if len(rfcs) != 1 {
@@ -813,7 +880,9 @@ func cmdTld(r Recipient, chName, args string) (result string) {
 	for _, line := range strings.Split(string(data), "\n") {
 		if strings.HasPrefix(line, "domain:") {
 			found = true
+			continue
 		}
+
 		if found && strings.Contains(line, ":") {
 			fields := strings.SplitN(line, ": ", 2)
 			if _, found := info[fields[0]]; !found {
@@ -821,14 +890,12 @@ func cmdTld(r Recipient, chName, args string) (result string) {
 			}
 		}
 	}
+
 	if len(info) < 1 {
 		result = fmt.Sprintf("No such TLD: '%s'", domain)
 	} else {
 		if len(info["organisation"]) > 0 {
 			result =  fmt.Sprintf("Organization: %s\n", info["organisation"])
-		}
-		if len(info["e-mail"]) > 0 {
-			result += fmt.Sprintf("Contact     : %s\n", info["e-mail"])
 		}
 		if len(info["e-mail"]) > 0 {
 			result += fmt.Sprintf("Contact     : %s\n", info["e-mail"])
@@ -889,6 +956,61 @@ func cmdTrivia(r Recipient, chName, args string) (result string) {
 	}
 
 	result = randomLineFromUrl(COMMANDS["trivia"].How, true)
+	return
+}
+
+func cmdUser(r Recipient, chName, args string) (result string) {
+	if len(args) < 1 {
+		result = "Usage: " + COMMANDS["user"].Usage
+		return
+	}
+
+	user := strings.TrimSpace(args)
+	candidates := []*hipchat.User{}
+
+
+	for _, u := range ROSTER {
+		uid := strings.SplitN(strings.Split(u.Id, "@")[0], "_", 2)[1]
+		if u.Name == user || u.Email == user ||
+			u.MentionName == user || uid == user {
+			result = fmt.Sprintf("%s <%s> (%s)", u.Name, u.Email, u.MentionName)
+			return
+		} else {
+			lc := strings.ToLower(u.Name)
+			luser := strings.ToLower(user)
+			lemail := strings.ToLower(u.Email)
+			lmention := strings.ToLower(u.MentionName)
+			if strings.Contains(lc, luser) ||
+				strings.Contains(lemail, luser) ||
+				strings.Contains(lmention, luser) {
+				candidates = append(candidates, u)
+			}
+		}
+
+	}
+
+	if len(candidates) > 0 {
+		result = "No user with that exact name found.\n"
+		if len(candidates) > 1 {
+			result += "Some possible candidates might be:\n"
+		} else {
+			result += "Did you mean:\n"
+		}
+		for i, u := range candidates {
+			if i > 6 {
+				result += "..."
+				break
+			}
+			result += fmt.Sprintf("%s <%s> (%s)\n", u.Name, u.Email, u.MentionName)
+		}
+	}
+
+
+	if len(result) < 1 {
+		HIPCHAT_CLIENT.RequestUsers()
+		result = "No such user: " + user
+	}
+
 	return
 }
 
@@ -1487,6 +1609,11 @@ func createCommands() {
 		"https://tools.ietf.org/html/",
 		"!rfc <rfc>",
 		nil}
+	COMMANDS["room"] = &Command{cmdRoom,
+		"show information about the given HipChat room",
+		"HipChat API",
+		"!room <name>",
+		nil}
 	COMMANDS["seen"] = &Command{cmdSeen,
 		"show last time <user> was seen in <channel>",
 		"builtin",
@@ -1530,6 +1657,11 @@ func createCommands() {
 		"show a random piece of trivia",
 		"https://XXX-SOME-LINK-WITH-VARIOUS-TRIVIA-SNIPPETS-HERE-XXX",
 		"!trivia",
+		nil}
+	COMMANDS["user"] = &Command{cmdUser,
+		"show information about the given HipChat user",
+		"HipChat API",
+		"!user <name>",
 		nil}
 	COMMANDS["vu"] = &Command{cmdVu,
 		"display summary of a CERT vulnerability",
@@ -1576,34 +1708,35 @@ func doTheHipChat() {
 	CONFIG["domain"] = domain
 	CONFIG["domainPrefix"] = strings.Split(user, "_")[0]
 
-	client, err := hipchat.NewClient(user, CONFIG["password"], "bot")
+	var err error
+	HIPCHAT_CLIENT, err = hipchat.NewClient(user, CONFIG["password"], "bot")
 	if err != nil {
-		fail(fmt.Sprintf("Client error: %s", err))
+		fail(fmt.Sprintf("Client error: %s\n", err))
 	}
 
-	client.Status("chat")
-	client.RequestUsers()
+	HIPCHAT_CLIENT.Status("chat")
+	HIPCHAT_CLIENT.RequestUsers()
+	HIPCHAT_CLIENT.RequestRooms()
 
 	for _, ch := range CHANNELS {
 		verbose(fmt.Sprintf("Joining #%s...", ch.Name), 1)
 		client.Join(ch.Jid, CONFIG["fullName"])
 	}
 
-	go client.KeepAlive()
+	go periodics()
+	go HIPCHAT_CLIENT.KeepAlive()
 
 	go func() {
 		defer catchPanic()
 
 		for {
 			select {
-			/* We need to consume all channels here,
-			   lest they end up blocking us. */
-			case message := <-client.Messages():
-				processMessage(client, message)
-			case users := <-client.Users():
+			case message := <-HIPCHAT_CLIENT.Messages():
+				processMessage(message)
+			case users := <-HIPCHAT_CLIENT.Users():
 				updateRoster(users)
-			case rooms := <-client.Rooms():
-				fmt.Fprintf(os.Stderr, "%q\n", rooms)
+			case rooms := <-HIPCHAT_CLIENT.Rooms():
+				updateRooms(rooms)
 			}
 		}
 	}()
@@ -1788,15 +1921,15 @@ func isThrottled(throttle string, ch *Channel) (is_throttled bool) {
 	return
 }
 
-func leave(client *hipchat.Client, r Recipient, channelFound bool, msg string, command bool) {
+func leave(r Recipient, channelFound bool, msg string, command bool) {
 	verbose(fmt.Sprintf("%s asked us to leave %s.", r.Name, r.ReplyTo), 2)
 	if !command && !strings.Contains(msg, "please") {
-		reply(client, r, "Please ask politely.")
+		reply(r, "Please ask politely.")
 		return
 	}
 
 	if channelFound {
-		client.Part(r.Jid, CONFIG["fullName"])
+		HIPCHAT_CLIENT.Part(r.Jid, CONFIG["fullName"])
 		delete(CHANNELS, r.ReplyTo)
 	} else {
 		reply(client, r, "Try again from a channel I'm in.")
@@ -1849,11 +1982,18 @@ func parseConfig() {
 	jbotDebug(fmt.Sprintf("%q", CONFIG))
 }
 
+func periodics() {
+        for _ = range time.Tick(PERIODICS * time.Second) {
+		HIPCHAT_CLIENT.RequestUsers()
+		HIPCHAT_CLIENT.RequestRooms()
+	}
+}
+
 func printVersion() {
 	fmt.Printf("%v version %v\n", PROGNAME, VERSION)
 }
 
-func processChatter(client *hipchat.Client, r Recipient, msg string, forUs bool) {
+func processChatter(r Recipient, msg string, forUs bool) {
 	var chitchat string
 	ch, found := CHANNELS[r.ReplyTo]
 
@@ -1863,7 +2003,7 @@ func processChatter(client *hipchat.Client, r Recipient, msg string, forUs bool)
 	 * message.  Priv messages only get
 	 * commands, not chatter. */
 	if !found {
-		go processCommands(client, r, "!", msg)
+		go processCommands(r, "!", msg)
 		return
 	} else if !forUs {
 		direct_re := regexp.MustCompile(fmt.Sprintf("(?i)@%s\b", CONFIG["mentionName"]))
@@ -1872,7 +2012,7 @@ func processChatter(client *hipchat.Client, r Recipient, msg string, forUs bool)
 
 	leave_re := regexp.MustCompile(fmt.Sprintf("(?i)^((@?%s[,:]? )(please )?leave)|(please )?leave[,:]? @?%s", CONFIG["mentionName"], CONFIG["mentionName"]))
 	if leave_re.MatchString(msg) {
-		leave(client, r, found, msg, false)
+		leave(r, found, msg, false)
 		return
 	}
 
@@ -1895,51 +2035,51 @@ func processChatter(client *hipchat.Client, r Recipient, msg string, forUs bool)
 				return
 			}
 		}
-		reply(client, r, cmdTrivia(r, r.ReplyTo, ""))
+		reply(r, cmdTrivia(r, r.ReplyTo, ""))
 		return
 	}
 
 	if wasInsult(msg) && (forUs ||
 		(ch.Toggles["chatter"] && mentioned)) {
-		reply(client, r, cmdInsult(r, r.ReplyTo, "me"))
+		reply(r, cmdInsult(r, r.ReplyTo, "me"))
 		return
 	}
 
 	chitchat = chatterMontyPython(msg)
 	if (len(chitchat) > 0) && ch.Toggles["chatter"] && ch.Toggles["python"] &&
 		!isThrottled("python", ch) {
-		reply(client, r, chitchat)
+		reply(r, chitchat)
 		return
 	}
 
 	chitchat = chatterSeinfeld(msg)
 	if (len(chitchat) > 0) && ch.Toggles["chatter"] && !isThrottled("seinfeld", ch) {
-		reply(client, r, chitchat)
+		reply(r, chitchat)
 		return
 	}
 
 	chitchat = chatterH2G2(msg)
 	if (len(chitchat) > 0) && ch.Toggles["chatter"] && !isThrottled("h2g2", ch) {
-		reply(client, r, chitchat)
+		reply(r, chitchat)
 		return
 	}
 
 	chitchat = chatterMisc(msg, ch, r)
 	if len(chitchat) > 0 && ch.Toggles["chatter"] {
-		reply(client, r, chitchat)
+		reply(r, chitchat)
 		return
 	}
 
 	if forUs || (ch.Toggles["chatter"] && mentioned) {
 		chitchat = chatterEliza(msg, r)
 		if len(chitchat) > 0 {
-			reply(client, r, chitchat)
+			reply(r, chitchat)
 		}
 		return
 	}
 }
 
-func processCommands(client *hipchat.Client, r Recipient, invocation, line string) {
+func processCommands(r Recipient, invocation, line string) {
 	defer catchPanic()
 	verbose(fmt.Sprintf("#%s: '%s'", r.ReplyTo, line), 2)
 
@@ -1962,7 +2102,7 @@ func processCommands(client *hipchat.Client, r Recipient, invocation, line strin
 	 * to be processed first. */
 	leave_re := regexp.MustCompile(`(please )?leave(,? please)?`)
 	if leave_re.MatchString(line) {
-		leave(client, r, channelFound, line, true)
+		leave(r, channelFound, line, true)
 		return
 	}
 
@@ -1977,7 +2117,7 @@ func processCommands(client *hipchat.Client, r Recipient, invocation, line strin
 		} else if strings.HasPrefix(invocation, "!") {
 			response = cmdHelp(r, r.ReplyTo, cmd)
 		} else if channelFound {
-			processChatter(client, r, line, true)
+			processChatter(r, line, true)
 			return
 		}
 	}
@@ -1991,11 +2131,11 @@ func processCommands(client *hipchat.Client, r Recipient, invocation, line strin
 		}
 	}
 
-	reply(client, r, response)
+	reply(r, response)
 	return
 }
 
-func processInvite(client *hipchat.Client, r Recipient, invite string) {
+func processInvite(r Recipient, invite string) {
 	from := strings.Split(invite, "'")[1]
 	fr := getRecipientFromMessage(from)
 	inviter := strings.Split(fr.Jid, "@")[0]
@@ -2006,7 +2146,11 @@ func processInvite(client *hipchat.Client, r Recipient, invite string) {
 	ch.Throttles = map[string]time.Time{}
 	ch.Name = r.ReplyTo
 	ch.Jid = r.Jid
-	ch.Inviter = ROSTER[inviter].MentionName
+	if _, found := ROSTER[inviter]; found {
+		ch.Inviter = ROSTER[inviter].MentionName
+	} else {
+		ch.Inviter = "Nobody"
+	}
 	ch.Users = make(map[hipchat.User]UserInfo, 0)
 
 	for t, v := range TOGGLES {
@@ -2016,10 +2160,10 @@ func processInvite(client *hipchat.Client, r Recipient, invite string) {
 	verbose(fmt.Sprintf("I was invited into '%s' (%s) by '%s'.", channelName, r.Jid, from), 2)
 	CHANNELS[channelName] = &ch
 	verbose(fmt.Sprintf("Joining #%s...", ch.Name), 1)
-	client.Join(r.Jid, CONFIG["fullName"])
+	HIPCHAT_CLIENT.Join(r.Jid, CONFIG["fullName"])
 }
 
-func processMessage(client *hipchat.Client, message *hipchat.Message) {
+func processMessage(message *hipchat.Message) {
 	if len(message.Body) < 1 {
 		/* If a user initiates a 1:1 dialog
 		 * with the bot, the hipchat client will send a ''
@@ -2040,16 +2184,16 @@ func processMessage(client *hipchat.Client, message *hipchat.Message) {
 	updateSeen(r, message.Body)
 
 	if strings.HasPrefix(message.Body, "<invite from") {
-		processInvite(client, r, message.Body)
+		processInvite(r, message.Body)
 		return
 	}
 
 	command_re := regexp.MustCompile(fmt.Sprintf("^(?i)(!|[@/]%s !?)", CONFIG["mentionName"]))
 	if command_re.MatchString(message.Body) {
 		matchEnd := command_re.FindStringIndex(message.Body)[1]
-		go processCommands(client, r, message.Body[0:matchEnd], message.Body[matchEnd:])
+		go processCommands(r, message.Body[0:matchEnd], message.Body[matchEnd:])
 	} else {
-		processChatter(client, r, message.Body, false)
+		processChatter(r, message.Body, false)
 	}
 }
 
@@ -2081,11 +2225,11 @@ func readSavedData() {
 	}
 }
 
-func reply(client *hipchat.Client, r Recipient, msg string) {
+func reply(r Recipient, msg string) {
 	if _, found := CHANNELS[r.ReplyTo]; found {
-		client.Say(r.Jid, CONFIG["fullName"], msg)
+		HIPCHAT_CLIENT.Say(r.Jid, CONFIG["fullName"], msg)
 	} else {
-		client.PrivSay(r.Jid, CONFIG["fullName"], msg)
+		HIPCHAT_CLIENT.PrivSay(r.Jid, CONFIG["fullName"], msg)
 	}
 
 }
@@ -2149,6 +2293,13 @@ func serializeData() {
 		fmt.Fprintf(os.Stderr, "Unable to write data to '%s': %s\n",
 			CONFIG["channelsFile"], err)
 		return
+	}
+}
+
+func updateRooms(rooms []*hipchat.Room) {
+	verbose("Updating rooms...", 3)
+	for _, room := range rooms {
+		ROOMS[room.Id] = room
 	}
 }
 
