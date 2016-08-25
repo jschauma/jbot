@@ -200,6 +200,62 @@ func cmdChannels(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdClear(r Recipient, chName, args string) (result string) {
+	count := 24
+
+	if len(args) > 0 {
+		if _, err := fmt.Sscanf(args, "%d", &count); err != nil {
+			result = cmdInsult(r, chName, "me")
+			return
+		}
+	}
+	if count < 1 {
+		result = cmdInsult(r, chName, "me")
+		return
+	}
+
+	if count > 40 {
+		result = "I'm not going to clear more than 40 lines."
+		return
+	}
+
+	n := 0
+	rcount := count
+	result = "/code "
+	for n < count {
+		i := rcount
+		for i > 0 {
+			result += "."
+			i--
+		}
+
+		result += "\n"
+		if rcount == 9 {
+			cowsay := cmdCowsay(r, chName, "clear")
+			// strip leading "/quote "
+			cowsay = cowsay[8:]
+			result += " " + cowsay
+			break
+		} else {
+			n++
+			rcount--
+		}
+	}
+	return
+}
+
+func cmdCowsay(r Recipient, chName, args string) (result string) {
+	if len(args) < 1 {
+		result = "Usage: " + COMMANDS["cowsay"].Usage
+		return
+	}
+
+	out, _ := runCommand("cowsay " + args)
+	result += "/code\n" + string(out)
+
+	return
+}
+
 func cmdCurses(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		sortedKeys := getSortedKeys(CURSES, true)
@@ -619,7 +675,10 @@ func cmdRoom(r Recipient, chName, args string) (result string) {
 	candidates := []*hipchat.Room{}
 
 	for _, aRoom := range ROOMS {
-		if aRoom.Name == room || aRoom.RoomId == room {
+		lc := strings.ToLower(aRoom.Name)
+		lroom := strings.ToLower(room)
+
+		if lc == lroom || aRoom.RoomId == room {
 			result = fmt.Sprintf("'%s' (%s)\n", aRoom.Name, aRoom.Privacy)
 			result += fmt.Sprintf("Topic: %s\n", aRoom.Topic)
 
@@ -638,8 +697,6 @@ func cmdRoom(r Recipient, chName, args string) (result string) {
 			result += fmt.Sprintf("https://%s.hipchat.com/history/room/%s\n", CONFIG["hcName"], aRoom.RoomId)
 			return
 		} else {
-			lc := strings.ToLower(aRoom.Name)
-			lroom := strings.ToLower(room)
 			if strings.Contains(lc, lroom) {
 				candidates = append(candidates, aRoom)
 			}
@@ -956,6 +1013,42 @@ func cmdTrivia(r Recipient, chName, args string) (result string) {
 	}
 
 	result = randomLineFromUrl(COMMANDS["trivia"].How, true)
+	return
+}
+
+func cmdUd(r Recipient, chName, args string) (result string) {
+
+	theUrl := COMMANDS["ud"].How
+	if len(args) > 0 {
+		theUrl += fmt.Sprintf("define.php?term=%s", url.QueryEscape(args))
+	} else {
+		theUrl += "random.php"
+	}
+
+	data := getURLContents(theUrl, false)
+	next := false
+
+	for _, line := range strings.Split(string(data), "\n") {
+		if next {
+			result += dehtmlify(line) + "\n"
+			next = false
+		}
+
+		if strings.Contains(line, `<a class="word" `) {
+			if len(result) > 0 {
+				break
+			}
+			result = dehtmlify(line) + ": "
+		}
+
+		if strings.Contains(line, `<div class='meaning'>`) {
+			next = true
+		}
+		if strings.Contains(line, `<div class='example'>`) {
+			result += "Example: "
+			next = true
+		}
+	}
 	return
 }
 
@@ -1544,6 +1637,17 @@ func createCommands() {
 		"builtin",
 		"!channels",
 		nil}
+	COMMANDS["clear"] = &Command{cmdClear,
+		"clear the screen / backlog",
+		"builtin",
+		"!clear [num]",
+		nil}
+	COMMANDS["cowsay"] = &Command{cmdCowsay,
+		"moo!",
+		"cowsay(1)",
+		"!cowsay <msg>",
+		nil}
+
 	COMMANDS["curses"] = &Command{cmdCurses,
 		"check your curse count",
 		"builtin",
@@ -1658,6 +1762,11 @@ func createCommands() {
 		"https://XXX-SOME-LINK-WITH-VARIOUS-TRIVIA-SNIPPETS-HERE-XXX",
 		"!trivia",
 		nil}
+	COMMANDS["ud"] = &Command{cmdUd,
+		"look up a term using the Urban Dictionary (NSFW)",
+		"https://www.urbandictionary.com/",
+		"!ud [<term>]",
+		nil}
 	COMMANDS["user"] = &Command{cmdUser,
 		"show information about the given HipChat user",
 		"HipChat API",
@@ -1720,7 +1829,7 @@ func doTheHipChat() {
 
 	for _, ch := range CHANNELS {
 		verbose(fmt.Sprintf("Joining #%s...", ch.Name), 1)
-		client.Join(ch.Jid, CONFIG["fullName"])
+		HIPCHAT_CLIENT.Join(ch.Jid, CONFIG["fullName"])
 	}
 
 	go periodics()
@@ -1932,7 +2041,7 @@ func leave(r Recipient, channelFound bool, msg string, command bool) {
 		HIPCHAT_CLIENT.Part(r.Jid, CONFIG["fullName"])
 		delete(CHANNELS, r.ReplyTo)
 	} else {
-		reply(client, r, "Try again from a channel I'm in.")
+		reply(r, "Try again from a channel I'm in.")
 	}
 	return
 }
@@ -2400,7 +2509,7 @@ func wasInsult(msg string) (result bool) {
 
 func main() {
 
-	if err := os.Setenv("PATH", "/bin:/usr/bin:/sbin:/usr/sbin"); err != nil {
+	if err := os.Setenv("PATH", "/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin"); err != nil {
 		fail(fmt.Sprintf("Unable to set PATH: %s\n", err))
 	}
 
