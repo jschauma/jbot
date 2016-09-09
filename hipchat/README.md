@@ -8,10 +8,13 @@ letting me play around with nonsense like this.
 You should be able to run the bot by populating a
 configuration file with suitable values.  The
 following configuration values are required:
+
+```
    password = the HipChat password of the bot user
    jabberID = the HipChat / JabberID of the bot user
    fullName = how the bot presents itself
    mentionName = to which name the bot responds to
+```
 
 This bot has a bunch of features that are company
 internal; those features have been removed from
