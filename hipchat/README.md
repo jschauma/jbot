@@ -398,8 +398,7 @@ Unset a per-channel setting.
 16:49 <jschauma> !user bob
 16:49 <jbot> No user with that exact name found.
 16:49 <jbot> Some possible candidates might be:
-16:49 <jbot> Bob Marley <bobmarley@domain.com>
-(bobc)
+16:49 <jbot> Bob Marley <bobmarley@domain.com> (bobc)
 16:49 <jbot> Bobby Tables <btables';drop table students;@domain.com>
 16:49 <jbot> ...
 16:52 <jschauma> !user 1234567
@@ -437,13 +436,16 @@ Unset a per-channel setting.
 
 ---
 
-Requirements:
-	- Go 1.3
+### Requirements:
+Go 1.3
 
-Installation:
-	- go build jbot.go
-	- install -c -m 755 jbot /somewhere/in/your/path/jbot
+### Installation:
+```
+go build jbot.go
+install -c -m 755 jbot /somewhere/in/your/path/jbot
+```
 
-Questions/comments:
-	jschauma@netmeister.org
-	https://twitter.com/jschauma
+### Questions/comments:
+jschauma@netmeister.org
+
+https://twitter.com/jschauma
