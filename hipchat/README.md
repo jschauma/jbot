@@ -80,7 +80,7 @@ The full list of public features can be seen via the
 The following is a list of commands supported as of
 2016-09-09 with examples.
 
-#### !8ball <question> -- ask the magic 8-ball
+#### !8ball &lt;question&gt; -- ask the magic 8-ball
 
 Ask the magic 8-ball. You get the expected reply.
 E.g.:
@@ -90,7 +90,7 @@ E.g.:
 16:16 <jbot> My sources say no.
 ```
 
-#### !asn <hostname|ip|asn> -- display information about ASN
+#### !asn &lt;hostname|ip|asn&gt; -- display information about ASN
 
 ```
 16:20 <jschauma> !asn www.yahoo.com
@@ -134,7 +134,7 @@ You can run:
 16:23 <jbot>                 ||     ||
 ```
 
-#### !cowsay <something> -- cowsay(1) something
+#### !cowsay &lt;something&gt; -- cowsay(1) something
 
 ```
 16:25 <jschauma> !cowsay moo
@@ -148,7 +148,7 @@ You can run:
 16:25 <jbot>                 ||     ||
 ```
 
-#### !curses [<user>] -- check your curse count
+#### !curses [&lt;user&gt;] -- check your curse count
 
 ```
 16:26 <jschauma> !curses
@@ -158,7 +158,7 @@ You can run:
 far.
 ```
 
-#### !cve <cve-id> -- display vulnerability description
+#### !cve &lt;cve-id&gt; -- display vulnerability description
 
 ```
 16:27 <jschauma> !cve CVE-2016-5385
@@ -191,7 +191,7 @@ Note: possibly NSFW.
 16:28 <jbot> A smallish city located just below the `O' in Colorado.
 ```
 
-#### !help [all|<command>] -- show help
+#### !help [all|&lt;command&gt;] -- show help
 
 ```
 10:49 <jans> !help
@@ -210,7 +210,7 @@ Note: possibly NSFW.
               unset, user, vu, weather, wtf
 ```
 
-#### !host <host> -- host lookup
+#### !host &lt;host&gt; -- host lookup
 
 ```
 Just like host(1).
@@ -221,14 +221,14 @@ Just like host(1).
 16:29 <jbot> fd-fp3.wg1.b.yahoo.com has IPv6 address 2001:4998:44:204::a8
 ```
 
-#### !how <command> -- show how a command is implemented
+#### !how &lt;command&gt; -- show how a command is implemented
 
 ```
 11:38 <jschauma> !how tld
 11:38 <jbot> whois -h whois.iana.org
 ```
 
-#### !info <channel> -- display info about a channel
+#### !info &lt;channel&gt; -- display info about a channel
 
 ```
 16:29 <jschauma> !info
@@ -242,14 +242,14 @@ Just like host(1).
 16:29 <jbot> This channel is currently unthrottled.
 ```
 
-#### !insult <somebody> -- insult somebody
+#### !insult &lt;somebody&gt; -- insult somebody
 
 ```
 16:30 <jschauma> !insult Donald Trump
 16:30 <jbot> Donald Trump: Thou saucy unchin-snouted lout!
 ```
 
-#### !jira <ticket> -- display info about a jira ticket
+#### !jira &lt;ticket&gt; -- display info about a jira ticket
 
 ```
 16:02 <jschauma> !jira foo-123
@@ -265,21 +265,21 @@ Just like host(1).
 
 Self-explanatory, hopefully.
 
-#### !ping <hostname> -- try to ping hostname
+#### !ping &lt;hostname&gt; -- try to ping hostname
 
 ```
 16:32 <jschauma> !ping www.yahoo.com
 16:32 <jbot> www.yahoo.com is alive.
 ```
 
-#### !quote <symbol> -- show stock price information
+#### !quote &lt;symbol&gt; -- show stock price information
 
 ```
 16:32 <jschauma> !quote yhoo
 16:32 <jbot> yhoo: 44.30 (-0.36 - -0.81%)
 ```
 
-#### !rfc <rfc> -- show RFC title and URL
+#### !rfc &lt;rfc&gt; -- show RFC title and URL
 
 ```
 16:33 <jschauma> !rfc 3514
@@ -287,7 +287,7 @@ Self-explanatory, hopefully.
 16:33 <jbot> https://tools.ietf.org/html/rfc3514
 ```
 
-#### !room <room> -- show information about the given HipChat room
+#### !room &lt;room&gt; -- show information about the given HipChat room
 
 ```
 16:34 <jschauma> !room bot
@@ -303,7 +303,7 @@ Self-explanatory, hopefully.
 16:34 <jbot> https://<company>.hipchat.com/history/room/2906069
 ```
 
-#### !seen <user> [<channel>] -- show last time <user> was seen in <channel>
+#### !seen &lt;user&gt; [&lt;channel&gt;] -- show last time &lt;user&gt; was seen in &lt;channel&gt;
 
 jbot can only see users in channels its in.
 
@@ -327,7 +327,7 @@ Set a channel setting.
 16:44 <jbot> You're just an academic.
 ```
 
-#### !stfu [<user>] -- show channel chatterers
+#### !stfu [&lt;user&gt;] -- show channel chatterers
 
 ```
 16:44 <jschauma> !stfu
@@ -351,7 +351,7 @@ been triggered within a given time frame. You can
 check which ones you're currently throttled for using
 this command.
 
-#### !tld [<tld>] -- display tld information
+#### !tld [&lt;tld&gt;] -- display tld information
 
 ```
 17:05 <jschauma> !tld de
@@ -363,7 +363,7 @@ this command.
 17:05 <jbot> URL         : http://www.denic.de/
 ```
 
-#### !toggle [<feature>] -- toggle a feature
+#### !toggle [&lt;feature&gt;] -- toggle a feature
 
 Turn on or off a feature. Most useful for turning off
 'chatter' (see above).
@@ -376,7 +376,7 @@ Turn on or off a feature. Most useful for turning off
               too hard.
 ```
 
-#### !ud <term> -- look up a term using the Urban Dictionary (NSFW)
+#### !ud &lt;term&gt; -- look up a term using the Urban Dictionary (NSFW)
 
 Note: possibly NSFW
 
@@ -390,7 +390,7 @@ Note: possibly NSFW
 
 Unset a per-channel setting.
 
-#### !user <user>-- show information about the given HipChat user
+#### !user &lt;user&gt;-- show information about the given HipChat user
 
 ```
 16:49 <jschauma> !user alice
@@ -406,7 +406,7 @@ Unset a per-channel setting.
 16:52 <jbot> Jan Schaumann <jschauma@netmeister.org> (jschauma)
 ```
 
-#### !vu <num> -- display summary of a CERT vulnerability
+#### !vu &lt;num&gt; -- display summary of a CERT vulnerability
 
 ```
 16:57 <jschauma> !vu 797896
@@ -419,7 +419,7 @@ Unset a per-channel setting.
 16:57 <jbot> https://www.kb.cert.org/vuls/id/797896
 ```
 
-#### !weather <location> -- show weather information
+#### !weather &lt;location&gt; -- show weather information
 
 ```
 16:57 <jschauma> !weather nyc
@@ -428,7 +428,7 @@ Unset a per-channel setting.
 16:57 <jbot> Tomorrow: Partly Cloudy (Low: 79; High: 90)
 ```
 
-#### !wtf <term> -- decrypt acronyms
+#### !wtf &lt;term&gt; -- decrypt acronyms
 
 ```
 16:57 <jschauma> !wtf arp
