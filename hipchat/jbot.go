@@ -110,6 +110,7 @@ type Channel struct {
 	Toggles   map[string]bool
 	Throttles map[string]time.Time
 	Users     map[hipchat.User]UserInfo
+	Settings  map[string]string
 }
 
 type CommandFunc func(Recipient, string, string) string
@@ -478,7 +479,7 @@ func cmdInfo(r Recipient, chName, args string) (result string) {
 
 		stfu := cmdStfu(r, chName, "")
 		if len(stfu) > 0 {
-			result += fmt.Sprintf("\nChannel chatterers for #%s:\n", args)
+			result += fmt.Sprintf("\nTop 10 channel chatterers for #%s:\n", args)
 			result += fmt.Sprintf("%s", stfu)
 		}
 
@@ -490,6 +491,12 @@ func cmdInfo(r Recipient, chName, args string) (result string) {
 		throttles := cmdThrottle(r, ch.Name, "")
 		if len(throttles) > 0 {
 			result += fmt.Sprintf("\n%s", throttles)
+		}
+
+		settings := cmdSet(r, ch.Name, "")
+		if !strings.HasPrefix(settings, "There currently are no settings") {
+			result += "\nThese are the channel settings:\n"
+			result += settings
 		}
 	} else {
 		result = "I have no info on #" + args
@@ -772,7 +779,11 @@ func cmdSeen(r Recipient, chName, args string) (result string) {
 	}
 
 	if !found {
-		result = "I'm not currently in #" + wanted[1]
+		if len(wanted) > 1 {
+			result = "I'm not currently in #" + wanted[1]
+		} else {
+			result = "Ask me about a user in a channel."
+		}
 		return
 	}
 
@@ -790,6 +801,49 @@ func cmdSeen(r Recipient, chName, args string) (result string) {
 	if len(result) < 1 {
 		result = fmt.Sprintf("I have not seen that user in #%s.", ch.Name)
 	}
+	return
+}
+
+func cmdSet(r Recipient, chName, args string) (result string) {
+	input := strings.SplitN(args, "=", 2)
+	if len(args) > 1 && len(input) != 2 {
+		result = "Usage:\n" + COMMANDS["set"].Usage
+		return
+	}
+
+	var ch *Channel
+	var found bool
+	if ch, found = CHANNELS[chName]; !found {
+		result = "I can only set things in a channel."
+		return
+	}
+
+	if len(args) < 1 {
+		if len(ch.Settings) < 1 {
+			result = fmt.Sprintf("There currently are no settings for #%s.", chName)
+			return
+		}
+		for n, v := range ch.Settings {
+			result += fmt.Sprintf("%s=%s\n", n, v)
+		}
+		return
+	}
+
+	name := strings.TrimSpace(input[0])
+	value := strings.TrimSpace(input[1])
+
+	if len(ch.Settings) < 1 {
+		ch.Settings = map[string]string{}
+	}
+
+	old := ""
+	if old, found = ch.Settings[name]; found {
+		old = fmt.Sprintf(" (was: %s)", old)
+	}
+
+	ch.Settings[name] = value
+
+	result = fmt.Sprintf("Set '%s' to '%s'%s.", name, value, old)
 	return
 }
 
@@ -825,15 +879,19 @@ func cmdStfu(r Recipient, chName, args string) (result string) {
 		for count := range chatter {
 			stfu = append(stfu, count)
 		}
-		sort.Ints(stfu)
+		sort.Sort(sort.Reverse(sort.IntSlice(stfu)))
 
 		var chatterers []string
-		for count, talker := range chatter {
-			for _, t := range talker {
-				chatterers = append(chatterers, fmt.Sprintf("%s (%d)", t, count))
+		for _, n := range stfu {
+			for _, t := range chatter[n] {
+				chatterers = append(chatterers, fmt.Sprintf("%s (%d)", t, n))
 			}
 		}
-		result += strings.Join(chatterers, ", ")
+		i := len(chatterers)
+		if i > 10 {
+			i = 10
+		}
+		result += strings.Join(chatterers[0:i], ", ")
 	}
 	return
 }
@@ -1052,6 +1110,35 @@ func cmdUd(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdUnset(r Recipient, chName, args string) (result string) {
+	input := strings.Fields(args)
+	if len(input) != 1 {
+		result = "Usage: " + COMMANDS["unset"].Usage
+		return
+	}
+
+	var ch *Channel
+	var found bool
+	if ch, found = CHANNELS[chName]; !found {
+		result = "I can only set things in a channel."
+		return
+	}
+
+	if len(ch.Settings) < 1 {
+		ch.Settings = map[string]string{}
+	}
+
+	old := ""
+	if old, found = ch.Settings[args]; found {
+		delete(ch.Settings, args)
+		result = fmt.Sprintf("Deleted %s=%s.", args, old)
+	} else {
+		result = fmt.Sprintf("No such setting: '%s'.", args)
+	}
+
+	return
+}
+
 func cmdUser(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["user"].Usage
@@ -1061,11 +1148,13 @@ func cmdUser(r Recipient, chName, args string) (result string) {
 	user := strings.TrimSpace(args)
 	candidates := []*hipchat.User{}
 
-
 	for _, u := range ROSTER {
 		uid := strings.SplitN(strings.Split(u.Id, "@")[0], "_", 2)[1]
-		if u.Name == user || u.Email == user ||
-			u.MentionName == user || uid == user {
+		email := strings.Split(u.Email, "@")[0]
+		if strings.EqualFold(u.Name, user) ||
+			strings.EqualFold(email, user) ||
+			strings.EqualFold(u.MentionName, user) ||
+			strings.EqualFold(uid, user) {
 			result = fmt.Sprintf("%s <%s> (%s)", u.Name, u.Email, u.MentionName)
 			return
 		} else {
@@ -1097,7 +1186,6 @@ func cmdUser(r Recipient, chName, args string) (result string) {
 			result += fmt.Sprintf("%s <%s> (%s)\n", u.Name, u.Email, u.MentionName)
 		}
 	}
-
 
 	if len(result) < 1 {
 		HIPCHAT_CLIENT.RequestUsers()
@@ -1293,7 +1381,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			fmt.Sprintf("Proszę bardzo, %s!", r.MentionName),
 			"/me takes a bow.",
 		},
-		regexp.MustCompile(`(good|bravo|well done|you rock|good job|nice|i love( you)?)`): []string{
+		regexp.MustCompile(`(best|good|bravo|well done|you rock|good job|nice|i love( you)?)`): []string{
 			"/me giddily hops up and down.",
 			"/me struts his stuff.",
 			"/me proudly smiles.",
@@ -1554,7 +1642,7 @@ func chatterMontyPython(msg string) (result string) {
 	result = ""
 	patterns := map[*regexp.Regexp]string{
 		regexp.MustCompile("(?i)(a|the|which|of) swallow"):                                      "An African or European swallow?",
-		regexp.MustCompile("(?i)(excalibur|lady of the lake|magical lake|merlin|avalon|druid)"): "Strange women lying in ponds distributing swords is no basis for a system of government!",
+		regexp.MustCompile("(?i)(excalibur|lady of the lake|magical lake|merlin|avalon|\bdruid\b)"): "Strange women lying in ponds distributing swords is no basis for a system of government!",
 		regexp.MustCompile("(?i)(Judean People's Front|People's Front of Judea)"):               "Splitters.",
 		regexp.MustCompile("(?i)really very funny"):                                             "I don't think there's a punch-line scheduled, is there?",
 		regexp.MustCompile("(?i)inquisition"):                                                   "Oehpr Fpuarvre rkcrpgf gur Fcnavfu Vadhvfvgvba.",
@@ -1647,7 +1735,6 @@ func createCommands() {
 		"cowsay(1)",
 		"!cowsay <msg>",
 		nil}
-
 	COMMANDS["curses"] = &Command{cmdCurses,
 		"check your curse count",
 		"builtin",
@@ -1723,6 +1810,12 @@ func createCommands() {
 		"builtin",
 		"!seen <user> [<channel>]",
 		nil}
+	COMMANDS["set"] = &Command{cmdSet,
+		"set a channel setting",
+		"builtin",
+		"!set -- show all current settings\n" +
+			"!set name=value -- set 'name' to 'value'\n",
+		[]string{"setting"}}
 	COMMANDS["speb"] = &Command{cmdSpeb,
 		"show a securty problem excuse bingo result",
 		/* http://crypto.com/bingo/pr */
@@ -1766,6 +1859,11 @@ func createCommands() {
 		"look up a term using the Urban Dictionary (NSFW)",
 		"https://www.urbandictionary.com/",
 		"!ud [<term>]",
+		nil}
+	COMMANDS["unset"] = &Command{cmdUnset,
+		"unset a channel setting",
+		"builtin",
+		"!unset name",
 		nil}
 	COMMANDS["user"] = &Command{cmdUser,
 		"show information about the given HipChat user",
@@ -2106,7 +2204,7 @@ func processChatter(r Recipient, msg string, forUs bool) {
 	var chitchat string
 	ch, found := CHANNELS[r.ReplyTo]
 
-	jbotDebug(fmt.Sprintf("%s - %s", msg, forUs))
+	jbotDebug(fmt.Sprintf("%s - %v", msg, forUs))
 	/* If we received a message but can't find the
 	 * channel, then it must have been a priv
 	 * message.  Priv messages only get
@@ -2125,6 +2223,13 @@ func processChatter(r Recipient, msg string, forUs bool) {
 		return
 	}
 
+	insult_re := regexp.MustCompile(fmt.Sprintf("(?i)^(@?%s[,:]? )(please )?insult ", CONFIG["mentionName"]))
+	if insult_re.MatchString(msg) {
+		target := strings.SplitN(msg, "insult ", 2)
+		reply(r, cmdInsult(r, r.ReplyTo, target[1]))
+		return
+	}
+
 	/* 'forUs' tells us if a message was
 	 * specifically directed at us via ! or @jbot;
 	 * these do not require a 'chatter' toggle to
@@ -2134,7 +2239,7 @@ func processChatter(r Recipient, msg string, forUs bool) {
 	mentioned_re := regexp.MustCompile(fmt.Sprintf("(?i)(^( *|yo,? |hey,? )%s[,:]?)|(,? *%s[.?!]?$)", CONFIG["mentionName"], CONFIG["mentionName"]))
 	mentioned := mentioned_re.MatchString(msg)
 
-	jbotDebug(fmt.Sprintf("forUs: %s; chatter: %s; mentioned: %s\n", forUs, ch.Toggles["chatter"], mentioned))
+	jbotDebug(fmt.Sprintf("forUs: %v; chatter: %v; mentioned: %v\n", forUs, ch.Toggles["chatter"], mentioned))
 
 	trivia_re := regexp.MustCompile(`(trivia|factlet)`)
 	if trivia_re.MatchString(msg) {
@@ -2253,6 +2358,7 @@ func processInvite(r Recipient, invite string) {
 	var ch Channel
 	ch.Toggles = map[string]bool{}
 	ch.Throttles = map[string]time.Time{}
+	ch.Settings = map[string]string{}
 	ch.Name = r.ReplyTo
 	ch.Jid = r.Jid
 	if _, found := ROSTER[inviter]; found {
@@ -2297,7 +2403,7 @@ func processMessage(message *hipchat.Message) {
 		return
 	}
 
-	command_re := regexp.MustCompile(fmt.Sprintf("^(?i)(!|[@/]%s !?)", CONFIG["mentionName"]))
+	command_re := regexp.MustCompile(fmt.Sprintf("^(?i)(!|[@/]%s [/!]?)", CONFIG["mentionName"]))
 	if command_re.MatchString(message.Body) {
 		matchEnd := command_re.FindStringIndex(message.Body)[1]
 		go processCommands(r, message.Body[0:matchEnd], message.Body[matchEnd:])
@@ -2406,7 +2512,6 @@ func serializeData() {
 }
 
 func updateRooms(rooms []*hipchat.Room) {
-	verbose("Updating rooms...", 3)
 	for _, room := range rooms {
 		ROOMS[room.Id] = room
 	}
@@ -2448,8 +2553,12 @@ func updateSeen(r Recipient, msg string) {
 		}
 
 		if t, found := ch.Users[*u]; found {
+			count := len(strings.Split(msg, "\n"))
+			if count > 1 {
+				count -= 1
+			}
 			uInfo.Curses = t.Curses + len(curses_match)
-			uInfo.Count = t.Count + 1
+			uInfo.Count = t.Count + count
 		} else {
 			uInfo.Count = 1
 			uInfo.Curses = 0
