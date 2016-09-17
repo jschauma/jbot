@@ -100,6 +100,43 @@ var TOGGLES = map[string]bool{
 	"trivia":  true,
 }
 
+var JBOT_SOURCE = "https://github.com/jschauma/jbot"
+
+var THANKYOU = []string{
+	"Thank you!",
+	"Glad to be of service.",
+	"Always happy to help.",
+	"Thanks - this channel is my life!",
+	"I appreciate your appreciation.",
+	"/me giddily hops up and down.",
+	"/me struts his stuff.",
+	"/me proudly smiles.",
+	"/me nods approvingly.",
+	"/me grins sheepishly.",
+	"/me takes a bow.",
+	"/me blushes.",
+}
+
+var DONTKNOW = []string{
+	"How the hell am I supposed to know that?",
+	"FIIK",
+	"ENOCLUE",
+	"Buh?",
+	"I have no idea.",
+	"Sorry, I wouldn't know about that.",
+	"I wouldn't tell you even if I knew.",
+	"You don't know??",
+	"Oh, uhm, ...I don't know. Do you?",
+	"I could tell you, but then I'd have to kill you.",
+	"Wouldn't you like to know.",
+	"You're a curious little hip-chatter, aren't you?",
+	"I'm sorry, that's classified.",
+	"The answer lies within yourself.",
+	"You know, if you try real hard, I'm sure you can figure it out yourself.",
+	"Ask more politely, and I may tell you.",
+	"Oh, come on, you know.",
+}
+
 var COOKIES []*http.Cookie
 var VERBOSITY int
 
@@ -127,6 +164,7 @@ type UserInfo struct {
 	Seen   string
 	Count  int
 	Curses int
+	Praise int
 }
 
 /*
@@ -315,7 +353,7 @@ func cmdCurses(r Recipient, chName, args string) (result string) {
 
 func cmdCve(r Recipient, chName, args string) (result string) {
 	cves := strings.Split(args, " ")
-	if len(cves) != 1 {
+	if len(args) < 1 || len(cves) != 1 {
 		result = "Usage: " + COMMANDS["cve"].Usage
 		return
 	}
@@ -460,9 +498,29 @@ func cmdHost(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdHow(r Recipient, chName, args string) (result string) {
+	if len(args) < 1 {
+		result = "Usage: " + COMMANDS["how"].Usage
+		return
+	}
+
+	if _, found := COMMANDS[args]; found {
+		result = COMMANDS[args].How
+	} else if strings.EqualFold(args, CONFIG["mentionName"]) {
+		result = JBOT_SOURCE
+	} else {
+		rand.Seed(time.Now().UnixNano())
+		result = DONTKNOW[rand.Intn(len(DONTKNOW))]
+	}
+
+	return
+}
+
 func cmdInfo(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		args = r.ReplyTo
+	} else {
+		args = strings.ToLower(args)
 	}
 
 	if ch, found := CHANNELS[args]; found {
@@ -610,6 +668,72 @@ func cmdPing(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdPraise(r Recipient, chName, args string) (result string) {
+	var ch *Channel
+	var found bool
+
+	if ch, found = CHANNELS[chName]; !found {
+		result = "This command only works in a channel."
+		return
+	}
+
+	if len(args) < 1 {
+		heroes := make(map[int][]string)
+		for u := range ch.Users {
+			if ch.Users[u].Praise > 0 {
+				heroes[ch.Users[u].Praise] = append(heroes[ch.Users[u].Praise], u.MentionName)
+			}
+		}
+
+		var praise []int
+		for count := range heroes {
+			praise = append(praise, count)
+		}
+		sort.Sort(sort.Reverse(sort.IntSlice(praise)))
+
+		var topten []string
+		for i, n := range praise {
+			for _, t := range heroes[n] {
+				topten = append(topten, fmt.Sprintf("%s (%d)", t, n))
+			}
+			if i > 10 {
+				break
+			}
+		}
+
+		result += strings.Join(topten, ", ")
+	} else {
+		if strings.EqualFold(args, "me") ||
+			strings.EqualFold(args, "myself") ||
+			strings.EqualFold(args,	r.MentionName) {
+			result = cmdInsult(r, chName, "me")
+			return
+		}
+
+		for _, u := range ROSTER {
+			uid := strings.SplitN(strings.Split(u.Id, "@")[0], "_", 2)[1]
+			email := strings.Split(u.Email, "@")[0]
+			if strings.EqualFold(u.Name, args) ||
+				strings.EqualFold(email, args) ||
+				strings.EqualFold(u.MentionName, args) ||
+				strings.EqualFold(uid, args) {
+				uInfo := ch.Users[*u]
+				uInfo.Praise++
+				ch.Users[*u] = uInfo
+			}
+		}
+
+		if strings.EqualFold(args, CONFIG["mentionName"]) {
+			rand.Seed(time.Now().UnixNano())
+			result = THANKYOU[rand.Intn(len(THANKYOU))]
+		} else {
+			result = fmt.Sprintf("%s: %s\n", args,
+				randomLineFromUrl(COMMANDS["praise"].How, true))
+		}
+	}
+	return
+}
+
 func cmdQuote(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["quote"].Usage
@@ -672,6 +796,37 @@ func cmdQuote(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdRfc(r Recipient, chName, args string) (result string) {
+	rfcs := strings.Split(args, " ")
+	if len(rfcs) != 1 {
+		result = "Usage: " + COMMANDS["rfc"].Usage
+		return
+	}
+
+	rfc := strings.ToLower(strings.TrimSpace(rfcs[0]))
+
+	if !strings.HasPrefix(rfc, "rfc") {
+		rfc = "rfc" + rfc
+	}
+
+	theUrl := fmt.Sprintf("%s%s", COMMANDS["rfc"].How, rfc)
+	data := getURLContents(theUrl, false)
+
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.Contains(line, "<span class=\"h1\">") {
+			result = dehtmlify(line)
+			break
+		}
+	}
+
+	if len(result) > 0 {
+		result += "\n" + theUrl
+	} else {
+		result = "No such RFC."
+	}
+
+	return
+}
 func cmdRoom(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["room"].Usage
@@ -1381,15 +1536,6 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			fmt.Sprintf("Proszę bardzo, %s!", r.MentionName),
 			"/me takes a bow.",
 		},
-		regexp.MustCompile(`(best|good|bravo|well done|you rock|good job|nice|i love( you)?)`): []string{
-			"/me giddily hops up and down.",
-			"/me struts his stuff.",
-			"/me proudly smiles.",
-			"/me nods approvingly.",
-			"/me grins sheepishly.",
-			"/me takes a bow.",
-			"/me blushes.",
-		},
 		regexp.MustCompile(`(?i)(how are you|how do you feel|feeling|emotion|sensitive)`): []string{
 			"I'm so very happy today!",
 			"Looks like it's going to be a wonderful day.",
@@ -1471,25 +1617,8 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Who for example?",
 			"Can you think of anybody in particular?",
 		},
-		regexp.MustCompile(`(?i)(where|when|why|what|who|which).*\?$`): []string{
-			"How the hell am I supposed to know that?",
-			"FIIK",
-			"ENOCLUE",
-			"Buh?",
-			"I have no idea.",
-			"Sorry, I wouldn't know about that.",
-			"I wouldn't tell you even if I knew.",
-			"You don't know??",
-			"Oh, uhm, ...I don't know. Do you?",
-			"I could tell you, but then I'd have to kill you.",
-			"Wouldn't you like to know.",
-			"You're a curious little hip-chatter, aren't you?",
-			"I'm sorry, that's classified.",
-			"The answer lies within yourself.",
-			"You know, if you try real hard, I'm sure you can figure it out yourself.",
-			"Ask more politely, and I may tell you.",
-			"Oh, come on, you know.",
-		},
+		regexp.MustCompile(`(best|good|bravo|well done|you rock|good job|nice|i love( you)?)`): THANKYOU,
+		regexp.MustCompile(`(?i)(where|when|why|what|who|which).*\?$`): DONTKNOW,
 	}
 
 	for pattern, replies := range eliza {
@@ -1765,6 +1894,11 @@ func createCommands() {
 		"host(1)",
 		"!host <host>",
 		nil}
+	COMMANDS["how"] = &Command{cmdHow,
+		"show how a command is implemented",
+		"builtin",
+		"!how <command>",
+		nil}
 	COMMANDS["info"] = &Command{cmdInfo,
 		"display info about a channel",
 		"builtin",
@@ -1790,6 +1924,11 @@ func createCommands() {
 		"ping(1)",
 		"!ping <hostname>",
 		nil}
+	COMMANDS["praise"] = &Command{cmdPraise,
+		"praise somebody",
+		"http://XXX-YOUR-PRAISE-URL-HERE-XXX/praise",
+		"!praise [<somebody>]",
+		[]string{"compliment"}}
 	COMMANDS["quote"] = &Command{cmdQuote,
 		"show stock price information",
 		"https://query.yahooapis.com/v1/public/yql",
@@ -2054,12 +2193,14 @@ func getSortedKeys(hash map[string]int, rev bool) (sorted []string) {
 		sort.Ints(vals)
 	}
 
+	seen := map[int]bool{}
 	for _, n := range vals {
 		for k, v := range hash {
-			if v == n {
+			if v == n  && !seen[n] {
 				sorted = append(sorted, k)
 			}
 		}
+		seen[n] = true
 	}
 	return
 }
@@ -2559,6 +2700,10 @@ func updateSeen(r Recipient, msg string) {
 			}
 			uInfo.Curses = t.Curses + len(curses_match)
 			uInfo.Count = t.Count + count
+
+			/* Need to remember other counters here,
+			 * lest they be reset. */
+			uInfo.Praise = t.Praise
 		} else {
 			uInfo.Count = 1
 			uInfo.Curses = 0
