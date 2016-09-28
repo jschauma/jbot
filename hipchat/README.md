@@ -16,6 +16,16 @@ following configuration values are required:
    mentionName = to which name the bot responds to
 ```
 
+You may optionally also set the following
+configuration values:
+
+```
+    channelFile = pathname where to store a state file
+    debug = whether to enable debugging output
+    hcName = your hipchat service name
+    opsgenieApiKey = an API key to access OpsGenie
+```
+
 This bot has a bunch of features that are company
 internal; those features have been removed from
 this public version.
@@ -267,6 +277,37 @@ Just like host(1).
 #### !leave -- cause me to leave the current channel
 
 Self-explanatory, hopefully.
+
+#### !oncall &lt;group&gt; --- show who's oncall
+
+This will attempt to look up an oncall schedule in
+OpsGenie.  This option requires the 'opsgenieApiKey'
+configuration option to be set.
+
+jbot tries to be helpful and display possible groups
+if it can't find the on you're looking for.
+
+If you want to save yourself some typing, you can also
+set a default oncall group for your channel via the
+'set' command. E.g.:
+
+```
+16:06 <jschauma> !set
+16:06 <jbot> There currently are no settings for #jtest.
+16:07 <jschauma> !oncall
+16:07 <jbot> No such group: jtest
+16:07 <jschauma> !oncall jbot
+16:07 <jbot> No OpsGenie schedule found for 'jbot'.
+16:07 <jbot> Possible candidates:
+16:07 <jbot> JBOT_Support, JBOT_ERMAGEHRD
+16:08 <jschauma> !oncall JBOT_Support
+16:08 <jbot> US: jschauma
+16:08 <jbot> EU: jschauma
+16:08 <jschauma> !oncall JBOT_ERMAGEHRD
+16:08 <jbot> Schedule found in OpsGenie for 'JBOT_ERMAGEHRD', but nobody's currently oncall.
+16:08 <jbot> You can try contacting the members of team 'JBOT_ERMAGEHRD':
+16:08 <jbot> jschauma@netmeister.org
+```
 
 #### !ping &lt;hostname&gt; -- try to ping hostname
 

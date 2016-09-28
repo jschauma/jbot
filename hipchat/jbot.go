@@ -73,17 +73,18 @@ const PROGNAME = "jbot"
 const VERSION = "3.0"
 
 var CONFIG = map[string]string{
-	"channelsFile": "/var/tmp/jbot.channels",
-	"configFile":   "/etc/jbot.conf",
-	"debug":        "no",
-	"domain":       "conf.hipchat.com",
-	"domainPrefix": "",
-	"fullName":     "",
-	"hcName":       "",
-	"jabberID":     "",
-	"mentionName":  "",
-	"password":     "",
-	"user":         "",
+	"channelsFile":   "/var/tmp/jbot.channels",
+	"configFile":     "/etc/jbot.conf",
+	"debug":          "no",
+	"domain":         "conf.hipchat.com",
+	"domainPrefix":   "",
+	"fullName":       "",
+	"hcName":         "",
+	"jabberID":       "",
+	"mentionName":    "",
+	"opsgenieApiKey": "",
+	"password":       "",
+	"user":           "",
 }
 
 var HIPCHAT_CLIENT *hipchat.Client
@@ -640,14 +641,186 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdOncall(r Recipient, chName, args string) (result string) {
+	oncall := args
+	if len(strings.Fields(oncall)) < 1 {
+		if ch, found := CHANNELS[r.ReplyTo]; found {
+			oncall = r.ReplyTo
+			if v, found := ch.Settings["oncall"]; found {
+				oncall = v
+			}
+		} else {
+			result = "Usage: " + COMMANDS["oncall"].Usage
+			return
+		}
+	}
+
+	result += cmdOncallOpsGenie(r, chName, oncall)
+	if len(result) < 1 {
+		result = fmt.Sprintf("No oncall information found for '%s'.", oncall)
+	}
+	return
+}
+
+func cmdOncallOpsGenie(r Recipient, chName, args string) (result string) {
+
+	key := CONFIG["opsgenieApiKey"]
+	if len(key) < 1 {
+		result = "Unable to query OpsGenie -- no API key in config file."
+		return
+	}
+
+	/* XXX: This will leak your API key into logs.
+	* OpsGenie API for read operations appears to require
+	* a GET operation, so there isn't much we can do
+	* about that. */
+	theUrl := fmt.Sprintf("https://api.opsgenie.com/v1/json/schedule/timeline?apiKey=%s&name=%s_schedule", key, url.QueryEscape(args))
+	data := getURLContents(theUrl, false)
+
+	var jsonResult map[string]interface{}
+
+	err := json.Unmarshal(data, &jsonResult)
+	if err != nil {
+		result = fmt.Sprintf("Unable to unmarshal opsgenie data: %s\n", err)
+		return
+	}
+
+	if _, found := jsonResult["timeline"]; !found {
+		result = fmt.Sprintf("No OpsGenie schedule found for '%s'.", args)
+
+		theUrl = fmt.Sprintf("https://api.opsgenie.com/v1/json/team?apiKey=%s", key)
+		data = getURLContents(theUrl, false)
+		err = json.Unmarshal(data, &jsonResult)
+		if err != nil {
+			result = fmt.Sprintf("Unable to unmarshal opsgenie data: %s\n", err)
+			return
+		}
+
+		if _, found := jsonResult["teams"]; !found {
+			return
+		}
+
+		var candidates []string
+
+		teams := jsonResult["teams"].([]interface{})
+		for _, t := range teams {
+			name := t.(map[string]interface{})["name"].(string)
+			if strings.Contains(strings.ToLower(name), strings.ToLower(args)) {
+				candidates = append(candidates, name)
+			}
+		}
+
+		if len(candidates) > 0 {
+			result += "\nPossible candidates:\n"
+			result += strings.Join(candidates, ", ")
+		}
+		return
+	}
+
+	timeline := jsonResult["timeline"].(map[string]interface{})
+	finalSchedule := timeline["finalSchedule"].(map[string]interface{})
+	rotations := finalSchedule["rotations"].([]interface{})
+
+	oncall := make(map[string][]string)
+	var maxlen int
+
+	for _, rot := range rotations {
+		rname := rot.(map[string]interface{})["name"].(string)
+		oncall[rname] = make([]string, 0)
+		if len(rname) > maxlen {
+			maxlen = len(rname)
+		}
+
+		periods := rot.(map[string]interface{})["periods"].([]interface{})
+		for _, p := range periods {
+
+			tmp := p.(map[string]interface{})["flattenedRecipients"]
+			if tmp != nil {
+				continue
+			}
+
+			endTime := int64(p.(map[string]interface{})["endTime"].(float64))
+			startTime := int64(p.(map[string]interface{})["startTime"].(float64))
+			end := time.Unix(endTime / 1000, endTime % 1000)
+			start := time.Unix(startTime / 1000, startTime % 1000)
+			if ((time.Since(end) > 0) || time.Since(start) < 0) {
+				continue
+			}
+
+			recipients := p.(map[string]interface{})["recipients"].([]interface{})
+			for _, r := range recipients {
+				current := r.(map[string]interface{})["displayName"].(string)
+				oncall[rname] = append(oncall[rname], current)
+			}
+		}
+	}
+
+	found := false
+	var oncallKeys []string
+	for rot, _ := range oncall {
+		oncallKeys = append(oncallKeys, rot)
+	}
+
+	sort.Strings(oncallKeys)
+
+	for _, rot := range oncallKeys {
+		oc := oncall[rot]
+		diff := maxlen - len(rot)
+		n := 0
+		for n < diff {
+			rot += " "
+			n++
+		}
+		if len(oc) > 0 {
+			found = true
+			result += fmt.Sprintf("%s: %s\n", rot, strings.Join(oc, ", "))
+		}
+	}
+
+	if !found {
+
+		result = fmt.Sprintf("Schedule found in OpsGenie for '%s', but nobody's currently oncall.", args)
+
+		theUrl = fmt.Sprintf("https://api.opsgenie.com/v1/json/team?apiKey=%s&name=%s", key, url.QueryEscape(args))
+		data = getURLContents(theUrl, false)
+		err = json.Unmarshal(data, &jsonResult)
+		if err != nil {
+			result += fmt.Sprintf("Unable to unmarshal opsgenie data: %s\n", err)
+			return
+		}
+
+		if _, found := jsonResult["members"]; !found {
+			return
+		}
+
+		var members []string
+
+		teams := jsonResult["members"].([]interface{})
+		for _, t := range teams {
+			name := t.(map[string]interface{})["user"].(string)
+			members = append(members, name)
+		}
+
+		if len(members) > 0 {
+			result += fmt.Sprintf("\nYou can try contacting the members of team '%s':\n", args)
+			result += strings.Join(members, ", ")
+		}
+	}
+
+	return
+}
+
 func cmdPing(r Recipient, chName, args string) (result string) {
-	hosts := strings.Split(args, " ")
-	if len(hosts) != 1 {
+	hosts := strings.Fields(args)
+	if len(hosts) > 1 {
 		result = "Usage: " + COMMANDS["ping"].Usage
 		return
 	}
 
-	if hosts[0] == CONFIG["mentionName"] {
+	if len(hosts) == 0 {
+		result = "pong"
+		return
+	} else if strings.ToLower(hosts[0]) == strings.ToLower(CONFIG["mentionName"]) {
 		result = "I'm alive!"
 		return
 	}
@@ -766,6 +939,11 @@ func cmdQuote(r Recipient, chName, args string) (result string) {
 	jsonCount := jsonOutput.(map[string]interface{})["count"].(float64)
 
 	var quotes []interface{}
+
+	if jsonResults == nil {
+		result = fmt.Sprintf("Invalid query: '%s'", args)
+		return
+	}
 
 	if jsonCount == 1 {
 		details := jsonResults.(map[string]interface{})["quote"]
@@ -1618,7 +1796,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Can you think of anybody in particular?",
 		},
 		regexp.MustCompile(`(best|good|bravo|well done|you rock|good job|nice|i love( you)?)`): THANKYOU,
-		regexp.MustCompile(`(?i)(where|when|why|what|who|which).*\?$`): DONTKNOW,
+		regexp.MustCompile(`(?i)(how come|where|when|why|what|who|which).*\?$`): DONTKNOW,
 	}
 
 	for pattern, replies := range eliza {
@@ -1687,7 +1865,7 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 		}
 	}
 
-	stern := regexp.MustCompile(`(?i)(stern|quivers|stockbroker|norris|dell'abate|beetlejuice|underdog|wack pack)`)
+	stern := regexp.MustCompile("(?i)(\bstern|quivers|stockbroker|norris|dell'abate|beetlejuice|underdog|wack pack)")
 	if stern.MatchString(msg) && !isThrottled("stern", ch) {
 		replies := []string{
 			"Bababooey bababooey bababooey!",
@@ -1919,6 +2097,11 @@ func createCommands() {
 		"builtin",
 		"!leave",
 		nil}
+	COMMANDS["oncall"] = &Command{cmdOncall,
+		"show who's oncall",
+		"OpsGenie",
+		"!oncall [<group>]",
+		nil}
 	COMMANDS["ping"] = &Command{cmdPing,
 		"try to ping hostname",
 		"ping(1)",
@@ -1956,7 +2139,7 @@ func createCommands() {
 			"!set name=value -- set 'name' to 'value'\n",
 		[]string{"setting"}}
 	COMMANDS["speb"] = &Command{cmdSpeb,
-		"show a securty problem excuse bingo result",
+		"show a security problem excuse bingo result",
 		/* http://crypto.com/bingo/pr */
 		"https://XXX-SOME-LINK-WITH-ALL-SPEB-REPLIES-HERE-XXX",
 		"!speb",
