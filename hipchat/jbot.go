@@ -101,7 +101,15 @@ var TOGGLES = map[string]bool{
 	"trivia":  true,
 }
 
-var JBOT_SOURCE = "https://github.com/jschauma/jbot"
+var URLS = map[string]string{
+	"eliza":   "https://XXX-SOME-LINK-WITH-WITTY-REPLIES-HERE-XXX",
+	"insults": "https://XXX-SOME-LINK-WITH-VARIOUS-INUSLTS-HERE-XXX",
+	"jbot":    "https://github.com/jschauma/jbot/",
+	"jira":    "https://XXX-YOUR-JIRA-DOMAIN-HERE-XXX",
+	"praise":  "http://XXX-YOUR-PRAISE-URL-HERE-XXX/",
+	"speb":    "https://XXX-SOME-LINK-WITH-ALL-SPEB-REPLIES-HERE-XXX",
+	"trivia":  "https://XXX-SOME-LINK-WITH-VARIOUS-TRIVIA-SNIPPETS-HERE-XXX",
+}
 
 var THANKYOU = []string{
 	"Thank you!",
@@ -508,7 +516,7 @@ func cmdHow(r Recipient, chName, args string) (result string) {
 	if _, found := COMMANDS[args]; found {
 		result = COMMANDS[args].How
 	} else if strings.EqualFold(args, CONFIG["mentionName"]) {
-		result = JBOT_SOURCE
+		result = URLS["jbot"]
 	} else {
 		rand.Seed(time.Now().UnixNano())
 		result = DONTKNOW[rand.Intn(len(DONTKNOW))]
@@ -577,7 +585,7 @@ func cmdInsult(r Recipient, chName, args string) (result string) {
 
 	rand.Seed(time.Now().UnixNano())
 	if rand.Intn(2) == 0 {
-		url := "https://XXX-SOME-LINK-WITH-VARIOUS-INUSLTS-HERE-XXX",
+		url := URLS["insults"]
 		result += randomLineFromUrl(url, true)
 	} else {
 		data := getURLContents(COMMANDS["insult"].How, false)
@@ -637,7 +645,7 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 	}
 
 	result += fmt.Sprintf("Reporter: %s\n", reporter)
-	result += fmt.Sprintf("Link    : https://XXX-YOUR-JIRA-DOMAIN-HERE-XXX/browse/%s", ticket)
+	result += fmt.Sprintf("Link    : %s/browse/%s", URLS["jira"], ticket)
 	return
 }
 
@@ -741,9 +749,9 @@ func cmdOncallOpsGenie(r Recipient, chName, args string) (result string) {
 
 			endTime := int64(p.(map[string]interface{})["endTime"].(float64))
 			startTime := int64(p.(map[string]interface{})["startTime"].(float64))
-			end := time.Unix(endTime / 1000, endTime % 1000)
-			start := time.Unix(startTime / 1000, startTime % 1000)
-			if ((time.Since(end) > 0) || time.Since(start) < 0) {
+			end := time.Unix(endTime/1000, endTime%1000)
+			start := time.Unix(startTime/1000, startTime%1000)
+			if (time.Since(end) > 0) || time.Since(start) < 0 {
 				continue
 			}
 
@@ -1005,6 +1013,7 @@ func cmdRfc(r Recipient, chName, args string) (result string) {
 
 	return
 }
+
 func cmdRoom(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["room"].Usage
@@ -1220,6 +1229,7 @@ func cmdStfu(r Recipient, chName, args string) (result string) {
 				chatterers = append(chatterers, fmt.Sprintf("%s (%d)", t, n))
 			}
 		}
+
 		i := len(chatterers)
 		if i > 10 {
 			i = 10
@@ -1822,7 +1832,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 		}
 	}
 
-	result = randomLineFromUrl("https://XXX-SOME-LINK-WITH-WITTY-REPLIES-HERE-XXX", true)
+	result = randomLineFromUrl(URLS["eliza"], true)
 	return
 }
 
@@ -2106,7 +2116,7 @@ func createCommands() {
 		nil}
 	COMMANDS["jira"] = &Command{cmdJira,
 		"display info about a jira ticket",
-		"https://XXX-YOUR-JIRA-URL-HERE-XXX/rest/api/latest/issue/",
+		URLS["jira"] + "/rest/api/latest/issue/",
 		"!jira <ticket>",
 		nil}
 	COMMANDS["leave"] = &Command{nil,
@@ -2126,7 +2136,7 @@ func createCommands() {
 		nil}
 	COMMANDS["praise"] = &Command{cmdPraise,
 		"praise somebody",
-		"http://XXX-YOUR-PRAISE-URL-HERE-XXX/praise",
+		URLS["praise"]
 		"!praise [<somebody>]",
 		[]string{"compliment"}}
 	COMMANDS["quote"] = &Command{cmdQuote,
@@ -2158,7 +2168,7 @@ func createCommands() {
 	COMMANDS["speb"] = &Command{cmdSpeb,
 		"show a security problem excuse bingo result",
 		/* http://crypto.com/bingo/pr */
-		"https://XXX-SOME-LINK-WITH-ALL-SPEB-REPLIES-HERE-XXX",
+		URLS["speb"],
 		"!speb",
 		[]string{"secbingo"}}
 	COMMANDS["stfu"] = &Command{cmdStfu,
@@ -2191,7 +2201,7 @@ func createCommands() {
 		nil}
 	COMMANDS["trivia"] = &Command{cmdTrivia,
 		"show a random piece of trivia",
-		"https://XXX-SOME-LINK-WITH-VARIOUS-TRIVIA-SNIPPETS-HERE-XXX",
+		URLS["trivia"],
 		"!trivia",
 		nil}
 	COMMANDS["ud"] = &Command{cmdUd,
@@ -2409,9 +2419,8 @@ func getSortedKeys(hash map[string]int, rev bool) (sorted []string) {
 	return
 }
 
-/* If 'useBY' is true, then the URL requires access
- * credentials.  How you get those cookies is up to
- * you, I'm afraid. */
+/* If 'useBY' is true, then the URL requires access credentials.
+ * How you get those cookies is up to you, I'm afraid. */
 func getURLContents(givenUrl string, useBY bool) (data []byte) {
 	verbose(fmt.Sprintf("Fetching %s (BY: %v)...", givenUrl, useBY), 3)
 	jar, err := cookiejar.New(nil)
@@ -2562,13 +2571,13 @@ func processChatter(r Recipient, msg string, forUs bool) {
 		forUs = direct_re.MatchString(msg)
 	}
 
-	leave_re := regexp.MustCompile(fmt.Sprintf("(?i)^((@?%s[,:]? )(please )?leave)|(please )?leave[,:]? @?%s", CONFIG["mentionName"], CONFIG["mentionName"]))
+	leave_re := regexp.MustCompile(fmt.Sprintf("(?i)^((@?%s[,:]? *)(please )?leave)|(please )?leave[,:]? @?%s", CONFIG["mentionName"], CONFIG["mentionName"]))
 	if leave_re.MatchString(msg) {
 		leave(r, found, msg, false)
 		return
 	}
 
-	insult_re := regexp.MustCompile(fmt.Sprintf("(?i)^(@?%s[,:]? )(please )?insult ", CONFIG["mentionName"]))
+	insult_re := regexp.MustCompile(fmt.Sprintf("(?i)^(@?%s[,:]? *)(please )?insult ", CONFIG["mentionName"]))
 	if insult_re.MatchString(msg) {
 		target := strings.SplitN(msg, "insult ", 2)
 		reply(r, cmdInsult(r, r.ReplyTo, target[1]))
@@ -2581,7 +2590,7 @@ func processChatter(r Recipient, msg string, forUs bool) {
 	 * be enabled.  If a message contains our
 	 * name, then we may respond only if 'chatter'
 	 * is not toggled off. */
-	mentioned_re := regexp.MustCompile(fmt.Sprintf("(?i)(^( *|yo,? |hey,? )%s[,:]?)|(,? *%s[.?!]?$)", CONFIG["mentionName"], CONFIG["mentionName"]))
+	mentioned_re := regexp.MustCompile(fmt.Sprintf("(?i)(^( *|yo,? ?|hey,? ?)%s[,:]?)|(,? *%s[.?!]?$)", CONFIG["mentionName"], CONFIG["mentionName"]))
 	mentioned := mentioned_re.MatchString(msg)
 
 	jbotDebug(fmt.Sprintf("forUs: %v; chatter: %v; mentioned: %v\n", forUs, ch.Toggles["chatter"], mentioned))

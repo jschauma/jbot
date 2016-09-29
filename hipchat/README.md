@@ -34,14 +34,11 @@ Some day this should be extended into a pluggable
 bot, so that internal code can more easily be kept
 apart, I suppose.  Pull requests welcome etc.
 
-
 Some of the URLs used by the bot reference simple text
 documents hosted on an internal server.  This is so as
 to not rely on outside resources and their flimsy
 markups as well as to control the contents somewhat.
-You can grep the sources for 'XXX' and replace the
-URLs with a link to a location you control.  (This,
-too, could be improved to be configurable.)
+You can update the URLS map in jbot.go.
 
 ---
 
