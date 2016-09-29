@@ -1640,6 +1640,23 @@ func cmdWeather(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdWhocyberedme(r Recipient, chName, args string) (result string) {
+	if len(args) > 1 {
+		result = "Usage: " + COMMANDS["whocyberedme"].Usage
+		return
+	}
+
+	data := getURLContents(COMMANDS["whocyberedme"].How, false)
+
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.Contains(l, "confirms") {
+			result = dehtmlify(l)
+			break
+		}
+	}
+	return
+}
+
 func cmdWtf(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["wtf"].Usage
@@ -2207,7 +2224,11 @@ func createCommands() {
 		"ywtf(1)",
 		"!wtf <term>",
 		nil}
-
+	COMMANDS["whocyberedme"] = &Command{cmdWhocyberedme,
+		"show who cybered you",
+		"https://whocybered.me",
+		"!whocyberedme",
+		[]string{"attribution"}}
 }
 
 func jbotDebug(in interface{}) {

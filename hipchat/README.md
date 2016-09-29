@@ -471,6 +471,13 @@ Unset a per-channel setting.
 16:57 <jbot> Tomorrow: Partly Cloudy (Low: 79; High: 90)
 ```
 
+#### !whocyberedme -- show who cybered you
+
+```
+15:27 <jschauma> !whocyberedme
+15:27 <jbot> Crowd Strike confirms: The NSA cybered you using a PEBKAC DoS.
+```
+
 #### !wtf &lt;term&gt; -- decrypt acronyms
 
 ```
