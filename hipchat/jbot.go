@@ -1076,38 +1076,6 @@ func cmdRoom(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdRfc(r Recipient, chName, args string) (result string) {
-	rfcs := strings.Split(args, " ")
-	if len(rfcs) != 1 {
-		result = "Usage: " + COMMANDS["rfc"].Usage
-		return
-	}
-
-	rfc := strings.ToLower(strings.TrimSpace(rfcs[0]))
-
-	if !strings.HasPrefix(rfc, "rfc") {
-		rfc = "rfc" + rfc
-	}
-
-	theUrl := fmt.Sprintf("%s%s", COMMANDS["rfc"].How, rfc)
-	data := getURLContents(theUrl, false)
-
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.Contains(line, "<span class=\"h1\">") {
-			result = dehtmlify(line)
-			break
-		}
-	}
-
-	if len(result) > 0 {
-		result += "\n" + theUrl
-	} else {
-		result = "No such RFC."
-	}
-
-	return
-}
-
 func cmdSeen(r Recipient, chName, args string) (result string) {
 	wanted := strings.Split(args, " ")
 	user := wanted[0]
@@ -2136,7 +2104,7 @@ func createCommands() {
 		nil}
 	COMMANDS["praise"] = &Command{cmdPraise,
 		"praise somebody",
-		URLS["praise"]
+		URLS["praise"],
 		"!praise [<somebody>]",
 		[]string{"compliment"}}
 	COMMANDS["quote"] = &Command{cmdQuote,
@@ -2750,6 +2718,11 @@ func processMessage(message *hipchat.Message) {
 		return
 	}
 
+	if len(r.Name) < 1 && len(r.MentionName) < 1 {
+		verbose(fmt.Sprintf("Ignoring channel topic message ('%s') in #%s.", message.Body, r.ReplyTo), 3)
+		return
+	}
+
 	updateSeen(r, message.Body)
 
 	if strings.HasPrefix(message.Body, "<invite from") {
@@ -2950,6 +2923,7 @@ func wasInsult(msg string) (result bool) {
 
 	var insultPatterns = []*regexp.Regexp{
 		regexp.MustCompile(fmt.Sprintf("(?i)fu[, ]@?%s", CONFIG["mentionName"])),
+		regexp.MustCompile("(?i)asshole|dickhead"),
 		regexp.MustCompile("(?i)dam+n? (yo)?u"),
 		regexp.MustCompile("(?i)shut ?(the fuck )?up"),
 		regexp.MustCompile("(?i)(screw|fuck) (yo)u"),
