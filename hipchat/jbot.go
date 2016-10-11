@@ -649,6 +649,22 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdLog(r Recipient, chName, args string) (result string) {
+	room := r.ReplyTo
+	if len(args) > 1 {
+		room = args
+	}
+
+	roomInfo := cmdRoom(r, chName, room)
+
+	if strings.Contains(roomInfo, "https://") {
+		result = roomInfo[strings.Index(roomInfo, "https://"):]
+	} else {
+		result = fmt.Sprintf("No log URL found for '%s'.", r.ReplyTo)
+	}
+	return
+}
+
 func cmdOncall(r Recipient, chName, args string) (result string) {
 	oncall := args
 	if len(strings.Fields(oncall)) < 1 {
@@ -2092,6 +2108,11 @@ func createCommands() {
 		"builtin",
 		"!leave",
 		nil}
+	COMMANDS["log"] = &Command{cmdLog,
+		"show the URL of a room's logs",
+		"HipChat API",
+		"!log [room]",
+		nil}
 	COMMANDS["oncall"] = &Command{cmdOncall,
 		"show who's oncall",
 		"OpsGenie",
@@ -2718,15 +2739,15 @@ func processMessage(message *hipchat.Message) {
 		return
 	}
 
-	if len(r.Name) < 1 && len(r.MentionName) < 1 {
-		verbose(fmt.Sprintf("Ignoring channel topic message ('%s') in #%s.", message.Body, r.ReplyTo), 3)
-		return
-	}
-
 	updateSeen(r, message.Body)
 
 	if strings.HasPrefix(message.Body, "<invite from") {
 		processInvite(r, message.Body)
+		return
+	}
+
+	if len(r.Name) < 1 && len(r.MentionName) < 1 {
+		verbose(fmt.Sprintf("Ignoring channel topic message ('%s') in #%s.", message.Body, r.ReplyTo), 3)
 		return
 	}
 
@@ -2923,7 +2944,7 @@ func wasInsult(msg string) (result bool) {
 
 	var insultPatterns = []*regexp.Regexp{
 		regexp.MustCompile(fmt.Sprintf("(?i)fu[, ]@?%s", CONFIG["mentionName"])),
-		regexp.MustCompile("(?i)asshole|dickhead"),
+		regexp.MustCompile("(?i)asshole|bitch|dickhead"),
 		regexp.MustCompile("(?i)dam+n? (yo)?u"),
 		regexp.MustCompile("(?i)shut ?(the fuck )?up"),
 		regexp.MustCompile("(?i)(screw|fuck) (yo)u"),
