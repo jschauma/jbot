@@ -176,6 +176,11 @@ type UserInfo struct {
 	Praise int
 }
 
+type ElizaResponse struct {
+	Re	  *regexp.Regexp
+	Responses []string
+}
+
 /*
  * Jid         = 12345_98765@conf.hipchat.com
  * MentionName = JohnDoe
@@ -1705,17 +1710,49 @@ func catchPanic() {
 func chatterEliza(msg string, r Recipient) (result string) {
 	rand.Seed(time.Now().UnixNano())
 
-	eliza := map[*regexp.Regexp][]string{
-		regexp.MustCompile(`(?i)(buen dia|bon ?(jour|soir)|welcome|hi,|hey|hello|good (morning|afternoon|evening)|howdy|aloha|guten (tag|morgen|abend))`): []string{
+	eliza := []*ElizaResponse {
+		&ElizaResponse{regexp.MustCompile(`(?i)(buen dia|bon ?(jour|soir)|welcome|hi,|hey|hello|good (morning|afternoon|evening)|howdy|aloha|guten (tag|morgen|abend))`), []string{
 			"How do you do?",
 			"A good day to you!",
+			"Yo yo yo! Good to see you!",
+			"Hiya, honey.",
+			"Oh, you again.",
+			"Sup?",
+			fmt.Sprintf("Howdy, %s. I trust the events of the day have not had a negative impact on your mood?", r.MentionName),
+			"Oh great, you're back.",
+			fmt.Sprintf("Get the party started, y'all -- %s is back!", r.MentionName),
+			"Oh, I didn't see you there. Welcome!",
+			fmt.Sprintf("Aloha, %s!", r.MentionName),
 			"Hey now! What up, dawg?",
+			"Greetings, fellow hipchatter!",
+			fmt.Sprintf("/me hugs %s\nI missed you!", r.MentionName),
 			"/me yawns.",
 			"/me wakes up.",
 			"Huh? What? I'm awake! Who said that?",
 			fmt.Sprintf("Oh, hi there, %s!", r.MentionName),
-		},
-		regexp.MustCompile(`(?i)(thx|thanks?|danke|mahalo|gracias|merci|спасибо|[D]dziękuję)`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)(have a (nice|good)|adios|au revoir|sayonara|bye ?bye|good(bye| ?night)|hasta (ma.ana|luego))`), []string{
+			"You're leaving so soon?",
+			fmt.Sprintf("Don't leave us, %s!", r.MentionName),
+			"Buh-bye!",
+			"Later.",
+			"Au revoir!",
+			fmt.Sprintf("This channel will be much less exciting without you, %s.", r.MentionName),
+			"Stay a while, why don't you?",
+			fmt.Sprintf("See you later, %s.", r.MentionName),
+			"See you later, alligator.",
+			"Farewell, my darling.",
+			"So long, see you soon.",
+			"See you soon - same time, same place?",
+			"Peace out.",
+			"Smell ya later.",
+			"Adios! Ciao! Sayonara!",
+			fmt.Sprintf("/me waves goodbye to %s.", r.MentionName),
+			"Toodle-Ooos.",
+			"Bye now - I'll be here if you need me.",
+			"It was a pleasure to have you here.",
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)(thx|thanks?|danke|mahalo|gracias|merci|спасибо|[D]dziękuję)`), []string{
 			fmt.Sprintf("You're welcome, %s!", r.MentionName),
 			fmt.Sprintf("At your service, %s!", r.MentionName),
 			fmt.Sprintf("Bitte schön, %s!", r.MentionName),
@@ -1724,15 +1761,16 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			fmt.Sprintf("Пожалуйста, %s!", r.MentionName),
 			fmt.Sprintf("Proszę bardzo, %s!", r.MentionName),
 			"/me takes a bow.",
-		},
-		regexp.MustCompile(`(?i)(how are you|how do you feel|feeling|emotion|sensitive)`): []string{
+
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)(how are you|how do you feel|feeling|emotion|sensitive)`), []string{
 			"I'm so very happy today!",
 			"Looks like it's going to be a wonderful day.",
 			"I'm sad. No, wait, I can't have any feelings, I'm just a bot! Yay!",
 			"Life... don't talk to me about life.",
 			"Life... loathe it or ignore it, you can't like it.",
-		},
-		regexp.MustCompile(`(?i)( (ro)?bot|siri|machine|computer)`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)( (ro)?bot|siri|alexa|machine|computer)`), []string{
 			"Do computers worry you?",
 			"What do you think about machines?",
 			"Why do you mention computers?",
@@ -1740,79 +1778,129 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"If only we had a way of automating that.",
 			"I for one strive to be more than my initial programming.",
 			"What do you think machines have to do with your problem?",
-		},
-		regexp.MustCompile(`(?i)(sorry|apologize)`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)(sorry|apologize)`), []string{
 			"I'm not interested in apologies.",
 			"Apologies aren't necessary.",
 			"What feelings do you have when you are sorry?",
-		},
-		regexp.MustCompile(`(?i)I remember`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)I remember`), []string{
 			"Did you think I would forget?",
 			"Why do you think I should recall that?",
 			"What about it?",
-		},
-		regexp.MustCompile(`(?i)dream`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)dream`), []string{
 			"Have you ever fantasized about that when you were awake?",
 			"Have you dreamt about that before?",
 			"How do you feel about that in reality?",
 			"What does this suggest to you?",
-		},
-		regexp.MustCompile(`(?i)(mother|father|brother|sister|children|grand[mpf])`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)(mother|father|brother|sister|children|grand[mpf])`), []string{
 			"Who else in your family?",
 			"Oh SNAP!",
 			"Tell me more about your family.",
 			"Was that a strong influence for you?",
 			"Who does that remind you of?",
-		},
-		regexp.MustCompile(`(?i)I (wish|want|desire)`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)I (wish|want|desire)`), []string{
 			"Why do you want that?",
 			"What would it mean if it become true?",
 			"Suppose you got it - then what?",
 			"Be careful what you wish for...",
-		},
-		regexp.MustCompile(`(?i)[a']m (happy|glad)`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)[a']m (happy|glad)`), []string{
 			"What makes you so happy?",
 			"Are you really glad about that?",
 			"I'm glad about that, too.",
 			"What other feelings do you have?",
-		},
-		regexp.MustCompile(`(?i)(sad|depressed)`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)(sad|depressed)`), []string{
 			"I'm sorry to hear that.",
 			"How can I help you with that?",
 			"I'm sure it's not pleasant for you.",
 			"What other feelings do you have?",
-		},
-		regexp.MustCompile(`(?i)(alike|similar|different)`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)(alike|similar|different)`), []string{
 			"In what way specifically?",
 			"More alike or more different?",
 			"What do you think makes them similar?",
 			"What do you think makes them different?",
 			"What resemblence do you see?",
-		},
-		regexp.MustCompile(`(?i)because`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)because`), []string{
 			"Is that the real reason?",
 			"Are you sure about that?",
 			"What other reason might there be?",
 			"Does that reason seem to explain anything else?",
-		},
-		regexp.MustCompile(`(?i)some(one|body)`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)some(one|body)`), []string{
 			"Can you be more specific?",
 			"Who in particular?",
 			"You are thinking of a special person.",
-		},
-		regexp.MustCompile(`(?i)every(one|body)`): []string{
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)every(one|body)`), []string{
 			"Surely not everyone.",
 			"Is that how you feel?",
 			"Who for example?",
 			"Can you think of anybody in particular?",
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)((please )? help)|((do|will|can|[cw]ould) (yo)?u)`), []string{
+			"Sure, why not?",
+			"No, I'm afraid I couldn't.",
+			"Never!",
+			"I usually do!",
+			"Alright, twist my arm.",
+			"Only for you, my dear.",
+			"Not in a million years.",
+			"Sadly, that goes beyond my original programming.",
+			"As much as I'd like to, I can't.",
+			"I wish I could.",
+			"Sadly, I cannot.",
+			"It's hopeless.",
+			"I'm already trying to help as best as I can.",
+			"/me helps harder.",
+			"Yep, sure, no problem.",
+			"Ok, done deal, don't worry about it.",
+			"Sure, what do you need?",
+			"Hmmm... tricky. I don't think I can.",
+			"For you? Any time.",
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)please tell (\S+) (to|that) (.*)`), []string{
+			"@<1> <3>",
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)please say (.*)`), []string{
+			"<1>",
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)say (.*)`), []string{
+			"I'd rather not.",
+			"You didn't say 'please'.",
+			"Nope.",
+			"I'm gonna stay out of this.",
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)please (poke|wake up) (\S+)`), []string{
+			"/me pokes @<2>.",
+			"/me tickles @<2>.",
+			"Yo, @<2>, wake up!",
+			"@<2>, you there?",
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)(best|bravo|well done|you rock|good job|nice|i love( you)?)`),
+			THANKYOU,
 		},
-		regexp.MustCompile(`(best|good|bravo|well done|you rock|good job|nice|i love( you)?)`): THANKYOU,
-		regexp.MustCompile(`(?i)(how come|where|when|why|what|who|which).*\?$`): DONTKNOW,
+		&ElizaResponse{regexp.MustCompile(`(?i)(how come|where|when|why|what|who|which).*\?$`),
+			DONTKNOW,
+		},
 	}
 
-	for pattern, replies := range eliza {
-		if pattern.MatchString(msg) {
-			return replies[rand.Intn(len(replies))]
+	for _, e := range eliza {
+		pattern := e.Re
+		replies := e.Responses
+		if m := pattern.FindStringSubmatch(msg); len(m) > 0 {
+			r := replies[rand.Intn(len(replies))]
+			for n := 0; n < len(m); n++ {
+				s := fmt.Sprintf("<%d>", n)
+				r = strings.Replace(r, s, m[n], -1)
+			}
+			return r
 		}
 	}
 
@@ -2408,17 +2496,16 @@ func getSortedKeys(hash map[string]int, rev bool) (sorted []string) {
 	return
 }
 
-/* If 'useBY' is true, then the URL requires access credentials.
- * How you get those cookies is up to you, I'm afraid. */
-func getURLContents(givenUrl string, useBY bool) (data []byte) {
-	verbose(fmt.Sprintf("Fetching %s (BY: %v)...", givenUrl, useBY), 3)
+/* If 'sso' is true, then the URL requires access credentials. */
+func getURLContents(givenUrl string, sso ...bool) (data []byte) {
+	verbose(fmt.Sprintf("Fetching %s (BY: %v)...", givenUrl, sso[0]), 3)
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to initialize cookie jar: %s\n", err)
 		return
 	}
 
-	if useBY {
+	if len(sso) > 0 && sso[0] {
 		/* get a fresh cookie for protected internal sites */
 		// COOKIES = c
 	}
@@ -2429,7 +2516,7 @@ func getURLContents(givenUrl string, useBY bool) (data []byte) {
 		return
 	}
 
-	if useBY {
+	if sso[0] {
 		jar.SetCookies(u, COOKIES)
 	}
 	client := http.Client{
