@@ -109,6 +109,7 @@ var URLS = map[string]string{
 	"praise":  "http://XXX-YOUR-PRAISE-URL-HERE-XXX/",
 	"speb":    "https://XXX-SOME-LINK-WITH-ALL-SPEB-REPLIES-HERE-XXX",
 	"trivia":  "https://XXX-SOME-LINK-WITH-VARIOUS-TRIVIA-SNIPPETS-HERE-XXX",
+	"yql":     "https://query.yahooapis.com/v1/public/yql",
 }
 
 var THANKYOU = []string{
@@ -670,6 +671,15 @@ func cmdLog(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdMonkeyStab(r Recipient, chName, args string) (result string) {
+	if len(args) < 1 || strings.EqualFold(args, CONFIG["mentionName"]) {
+		args = r.MentionName
+	}
+
+	result = fmt.Sprintf("/me unleashes a troop of pen-wielding stabbing-monkeys on %s!\n", args)
+	return
+}
+
 func cmdOncall(r Recipient, chName, args string) (result string) {
 	oncall := args
 	if len(strings.Fields(oncall)) < 1 {
@@ -697,6 +707,10 @@ func cmdOncallOpsGenie(r Recipient, chName, args string) (result string) {
 	if len(key) < 1 {
 		result = "Unable to query OpsGenie -- no API key in config file."
 		return
+	}
+
+	if strings.HasSuffix(args, "_schedule") {
+		args = args[0:strings.Index(args, "_schedule")]
 	}
 
 	/* XXX: This will leak your API key into logs.
@@ -1303,6 +1317,29 @@ func cmdThrottle(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdTime(r Recipient, chName, args string) (result string) {
+	timezones := []string{ "UTC", "EST5EDT", "PST8PDT" }
+	if len(args) > 0 {
+		timezones = []string{args}
+	}
+
+	for _, l := range timezones {
+		if loc, err := time.LoadLocation(l); err == nil {
+			result += fmt.Sprintf("%s\n", time.Now().In(loc).Format(time.UnixDate))
+		} else {
+			tz := locationToTZ(l)
+			if loc, err := time.LoadLocation(tz); err == nil {
+				result += fmt.Sprintf("%s\n", time.Now().In(loc).Format(time.UnixDate))
+			} else {
+				result = fmt.Sprintf("Can't determine a valid timezone for '%s'.", l)
+			}
+			return
+		}
+	}
+
+	return
+}
+
 func cmdTld(r Recipient, chName, args string) (result string) {
 	input := strings.Fields(args)
 	if len(args) < 1 || len(input) != 1 {
@@ -1403,6 +1440,15 @@ func cmdTrivia(r Recipient, chName, args string) (result string) {
 	}
 
 	result = randomLineFromUrl(COMMANDS["trivia"].How, true)
+	return
+}
+
+func cmdTroutSlap(r Recipient, chName, args string) (result string) {
+	if len(args) < 1 || strings.EqualFold(args, CONFIG["mentionName"]) {
+		args = r.MentionName
+	}
+
+	result = fmt.Sprintf("/me pulls out a foul-smelling trout and slaps %s across the face.\n", args)
 	return
 }
 
@@ -2201,6 +2247,11 @@ func createCommands() {
 		"HipChat API",
 		"!log [room]",
 		nil}
+	COMMANDS["monkeystab"] = &Command{cmdMonkeyStab,
+		"unleash a troop of pen-wielding stabbing monkeys",
+		"builtin",
+		"!monkeystab <something>",
+		nil}
 	COMMANDS["oncall"] = &Command{cmdOncall,
 		"show who's oncall",
 		"OpsGenie",
@@ -2218,7 +2269,7 @@ func createCommands() {
 		[]string{"compliment"}}
 	COMMANDS["quote"] = &Command{cmdQuote,
 		"show stock price information",
-		"https://query.yahooapis.com/v1/public/yql",
+		URLS["yql"],
 		"!quote <symbol>",
 		[]string{"stock"}}
 	COMMANDS["rfc"] = &Command{cmdRfc,
@@ -2266,6 +2317,11 @@ func createCommands() {
 			"!throttle <something> <seconds> -- set throttle for <something> to <seconds>\n" +
 			"Note: I will happily let you set throttles I don't know or care about.",
 		nil}
+	COMMANDS["time"] = &Command{cmdTime,
+		"show the current time",
+		"builtin",
+		"!time [TZ]",
+		nil}
 	COMMANDS["tld"] = &Command{cmdTld,
 		"show what TLD is",
 		"whois -h whois.iana.org",
@@ -2280,6 +2336,11 @@ func createCommands() {
 		"show a random piece of trivia",
 		URLS["trivia"],
 		"!trivia",
+		nil}
+	COMMANDS["troutslap"] = &Command{cmdTroutSlap,
+		"troutslap a sucker",
+		"builtin",
+		"!troutslap <something>",
 		nil}
 	COMMANDS["ud"] = &Command{cmdUd,
 		"look up a term using the Urban Dictionary (NSFW)",
@@ -2303,7 +2364,7 @@ func createCommands() {
 		nil}
 	COMMANDS["weather"] = &Command{cmdWeather,
 		"show weather information",
-		"https://query.yahooapis.com/v1/public/yql",
+		URLS["yql"],
 		"!weather <location>",
 		nil}
 	COMMANDS["wtf"] = &Command{cmdWtf,
@@ -2571,6 +2632,41 @@ func leave(r Recipient, channelFound bool, msg string, command bool) {
 	} else {
 		reply(r, "Try again from a channel I'm in.")
 	}
+	return
+}
+
+func locationToTZ(l string) (result string) {
+	query := "?format=json&q="
+	query += url.QueryEscape(`select timezone from geo.places(1) where text="` + l + `"`)
+
+	theUrl := fmt.Sprintf("%s%s", URLS["yql"], query)
+	data := getURLContents(theUrl, false)
+
+	var jsonData map[string]interface{}
+	err := json.Unmarshal(data, &jsonData)
+	if err != nil {
+		result = fmt.Sprintf("Unable to unmarshal quote data: %s\n", err)
+		return
+	}
+
+	if _, found := jsonData["query"]; !found {
+		result = fmt.Sprintf("Something went bump when searching YQL for geo data matching '%s'.", l)
+		return
+	}
+
+	jsonOutput := jsonData["query"]
+	jsonResults := jsonOutput.(map[string]interface{})["results"]
+	jsonCount := jsonOutput.(map[string]interface{})["count"].(float64)
+
+	if jsonCount != 1 {
+		result = fmt.Sprintf("No results found for '%s'.", l)
+		return
+	}
+
+	place := jsonResults.(map[string]interface{})["place"]
+	timezone := place.(map[string]interface{})["timezone"]
+	result = fmt.Sprintf("%s", timezone.(map[string]interface{})["content"])
+
 	return
 }
 
@@ -3039,6 +3135,7 @@ func wasInsult(msg string) (result bool) {
 		regexp.MustCompile("(?i)fuck (off|(yo)u)"),
 		regexp.MustCompile("(?i)(yo)?u (suck|blow|are (useless|lame|dumb|stupid|stink))"),
 		regexp.MustCompile("(?i)(stfu|go to hell)"),
+		regexp.MustCompile("(?i) is (stupid|dumb|annoying|lame|boring|useless)"),
 		regexp.MustCompile(fmt.Sprintf("(?i)(stupid|annoying|lame|boring|useless) +(%s|bot)", CONFIG["mentionName"])),
 		regexp.MustCompile(fmt.Sprintf("(?i)(blame )?(%s|the bot)('?s fault)", CONFIG["mentionName"])),
 	}
