@@ -315,6 +315,17 @@ set a default oncall group for your channel via the
 16:32 <jbot> www.yahoo.com is alive.
 ```
 
+#### !praise [&lt;somebody&gt;] -- praise somebody
+
+```
+20:43 <jschauma> !praise jbot
+20:43  * jbot blushes.
+20:43 <jschauma> !praise somebody
+20:43 <jbot> somebody: You're nicer than a day on the beach.
+20:43 <jschauma> !praise
+20:43 <jbot> jbot (18), somebody (1)
+```
+
 #### !quote &lt;symbol&gt; -- show stock price information
 
 ```
@@ -393,6 +404,33 @@ Certain triggers only kick in unless it's previously
 been triggered within a given time frame. You can
 check which ones you're currently throttled for using
 this command.
+
+#### !tld [&lt;tld&gt;] -- display tld information
+
+```
+17:05 <jschauma> !tld de
+17:05 <jbot> Organization: DENIC eG
+17:05 <jbot> Contact     : vorstand@denic.de
+17:05 <jbot> Whois       : whois.denic.de
+17:05 <jbot> Status      : ACTIVE
+17:05 <jbot> Created     : 1986-11-05
+17:05 <jbot> URL         : http://www.denic.de/
+```
+
+#### !time [location] -- show the current time (in the given location)
+
+```
+16:59 <jschauma> !time
+16:59 <jbot> Tue Nov  1 20:59:19 UTC 2016
+16:59 <jbot> Tue Nov  1 16:59:19 EDT 2016
+16:59 <jbot> Tue Nov  1 13:59:19 PDT 2016
+16:59 <jschauma> !time new york
+16:59 <jbot> Tue Nov  1 16:59:23 EDT 2016
+16:59 <jschauma> !time taipei
+16:59 <jbot> Wed Nov  2 04:59:48 CST 2016
+17:01 <jschauma> !time Portugal
+17:01 <jbot> Tue Nov  1 21:01:35 WET 2016
+```
 
 #### !tld [&lt;tld&gt;] -- display tld information
 
