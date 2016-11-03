@@ -1,4 +1,4 @@
-#! /usr/bin/env python
+#! /usr/bin/env python2.7
 #
 # Just a Bunch of Tweets - a twitter bot.
 #
@@ -15,6 +15,7 @@ import datetime
 import fcntl
 import getopt
 import htmlentitydefs
+import httplib
 import json
 import os
 import random
@@ -293,7 +294,7 @@ def cmd_geoip(msg, url):
 
     txt = msg.text
     # Yeah, yeah, yeah, this is not an IP.  I know.
-    pattern = re.compile('.*!geoip\s+(?P<ip>\d+\.\d+\.\d+\.\d+).*')
+    pattern = re.compile('.*!geoip\s+(?P<ip>(\d+\.\d+\.\d+\.\d+)|(\S+\,\S+)").*')
     match = pattern.match(txt)
     if match:
         ip = match.group('ip')
@@ -471,7 +472,7 @@ def cmd_schneier(msg, url):
         for line in urllib2.urlopen(url).readlines():
             match = pattern.match(line)
             if match:
-                return match.group('fact')
+                return dehtmlify(match.group('fact'))
 
         sys.stderr.write("Tried to get a fact from %s but found nothing." % url)
     except urllib2.URLError, e:
@@ -695,7 +696,7 @@ def picOfTheDay(msg=None, link=None):
 
     url = url + ymd.strftime("/%Y/%m/%d")
 
-    pic_pattern = re.compile('.*<span class="photo_container pc_m"><a href="(?P<link>/photos/.*)" title="(?P<title>.*) by (?P<author>.*)"><img src', re.I)
+    pic_pattern = re.compile('.*<span class="photo_container pc_m"><a[^>]*href="(?P<link>/photos/.*)" title="(?P<title>.*) by (?P<author>.*)"><img src', re.I)
 
     try:
         for line in urllib2.urlopen(url).readlines():
@@ -1004,7 +1005,8 @@ DAILIES = {
     "de-wiki" : ("http://de.wikipedia.org/wiki/Spezial:Zuf%C3%A4llige_Seite", randomWikipedia),
     "uncyclopedia" : ("http://uncyclopedia.wikia.com/wiki/Special:Random", randomWikipedia),
     "gwotd" : ("http://feeds2.feedburner.com/duden/WdT?format=xml", germanWordOfTheDay),
-    "uwotd" : ("http://feeds.urbandictionary.com/UrbanWordOfTheDay", urbanWordOfTheDay),
+# 2013-08-04 -- feed really isn't daily at all, so disable
+#    "uwotd" : ("http://feeds.urbandictionary.com/UrbanWordOfTheDay", urbanWordOfTheDay),
     "beer" : ("http://www.beeroftheday.com/", beerOfTheDay),
     "onthisday" : ("http://learning.blogs.nytimes.com/on-this-day/", onThisDay),
     "born" : ("http://rss.imdb.com/daily/born/", bornToday),
@@ -1057,10 +1059,10 @@ COMMANDS = {
                         "The Daily Jbot", "Tweet"),
     "tool"    : Command("tool", cmd_tool,
                         "user", "make somebody a tool",
-                        "That's a secret.", "Tweet"),
-    "trivia"  : Command("trivia", cmd_trivia,
-                        "", "display some useless information",
-                        "http://www.nicefacts.com/quickfacts/index.php", "URL")
+                        "That's a secret.", "Tweet")
+#    "trivia"  : Command("trivia", cmd_trivia,
+#                        "", "display some useless information",
+#                        "http://www.nicefacts.com/quickfacts/index.php", "URL")
 }
 
 JBOT_HELP_URL = "http://www.netmeister.org/apps/twitter/jbot/help.html"
@@ -1068,6 +1070,89 @@ JBOT_HELP_URL = "http://www.netmeister.org/apps/twitter/jbot/help.html"
 ###
 ### Snarkisms etc.
 ###
+
+PROGRAMMING_QUOTES = [
+    "The computing scientist's main challenge is not to get confused by the complexities of his own making. -Dijkstra",
+    "The cheapest, fastest, and most reliable components are those that aren't there. -Bell",
+    "One of my most productive days was throwing away 1000 lines of code. -Ken Thompson",
+    "When in doubt, use brute force. -Ken Thompson",
+    "Deleted code is debugged code. -Sickel",
+    "The most effective debugging tool is still careful thought, coupled with judiciously placed print statements. -Kernighan",
+    "Any fool can write code that a computer can understand. Good programmers write code that humans can understand. - Fowler",
+    "Controlling complexity is the essence of computer programming. -Kernighan",
+    "UNIX was not designed to stop its users from doing stupid things, as that would also stop them from doing clever things. -Gwyn",
+    "The central enemy of reliability is complexity. -Geer",
+    "Simplicity is prerequisite for reliability. -Dijkstra",
+    "The key to performance is elegance, not battalions of special cases. -McIllroy",
+    "Object-oriented design is the roman numerals of computing. -Pike",
+    "Simplicity is the ultimate sophistication. -da Vinci",
+    "Compatibility means deliberately repeating other people's mistakes. -Wheeler",
+    "Nobody who uses XML knows what they are doing. -Wenham",
+    "The unavoidable price of reliability is simplicity. -Hoare",
+    "You're bound to be unhappy if you optimize everything. -Knuth",
+    "The purpose of software engineering is to control complexity, not to create it. -Zave",
+    "Complexity has nothing to do with intelligence, simplicity does. -Bossidy",
+    "Things which any idiot could write usually have the quality of having been written by an idiot. -Cohen",
+    "There's nothing in computing that can't be broken by another level of indirection. -Pike"
+    ]
+
+MURPHY = [
+    "Any given program, when running, is obsolete.",
+    "Any given program costs more and takes longer each time it is run.",
+    "If a program is useful, it will have to be changed.",
+    "If a program is useless, it will have to be documented.",
+    "Any given program will expand to fill all the available memory.",
+    "The value of a program is inversely proportional to the weight of its output.",
+    "Program complexity grows until it exceeds the capability of the programmer who must maintain it.",
+    "Every non trivial program has at least one bug.",
+    "Bugs will appear in one part of a working program when another 'unrelated' part is modified.",
+    "The subtlest bugs cause the greatest damage and problems.",
+    "A 'debugged' program that crashes will wipe out source files on storage devices when there is the least available backup.",
+    "A hardware failure will cause system software to crash, and the customer engineer will blame the programmer.",
+    "A system software crash will cause hardware to act strangely and the programmers will blame the customer engineer.",
+    "Undetectable errors are infinite in variety, in contrast to detectable errors, which by definition are limited.",
+    "Adding manpower to a late software project makes it later.",
+    "Make it possible for programmers to write programs in English, and you will find that programmers can not write in English.",
+    "The documented interfaces between standard software modules will have undocumented quirks.",
+    "The probability of a hardware failure disappearing is inversely proportional to the distance between the computer and the customer engineer.",
+    "A working program is one that has only unobserved bugs.",
+    "No matter how many resources you have, it is never enough.",
+    "Any cool program always requires more memory than you have.",
+    "When you finally buy enough memory, you will not have enough disk space.",
+    "Disks are always full. It is futile to try to get more disk space. Data expands to fill any void.",
+    "If a program actually fits in memory and has enough disk space, it is guaranteed to crash.",
+    "If such a program has not crashed yet, it is waiting for a critical moment before it crashes.",
+    "No matter how good of a deal you get on computer components, the price will always drop immediately after the purchase.",
+    "All components become obsolete.",
+    "The speed with which components become obsolete is directly proportional to the price of the component.",
+    "Software bugs are impossible to detect by anybody except the end user.",
+    "The maintenance engineer will never have seen a model quite like yours before.",
+    "It is axiomatic that any spares required will have just been discontinued and will be no longer in stock.",
+    "Any VDU, from the cheapest to the most expensive, will protect a twenty cent fuse by blowing first.",
+    "Any manufacturer making his warranties dependent upon the device being earthed will only supply power cabling with two wires.",
+    "If a circuit requires n components, then there will be only n - 1 components in locally-held stocks.",
+    "A failure in a device will never appear until it has passed final inspection.",
+    "A program generator creates programs that are more buggy than the program generator.",
+    "All Constants are Variables.",
+    "Constants aren't; Variables won't",
+    "A part dropped from the workbench will roll to a degree of un-reachability proportional to its importance.",
+    "In a transistor circuit protected by a fuse, the transistor will always blow to protect the fuse.",
+    "Each computer code has five bugs, and this number does not depend on how many bugs have been already found (it is conservative).",
+    "Profanity is one language all computer users know.",
+    "The number of bugs always exceeds the number of lines found in a program.",
+    "An expert is someone brought in at the last minute to share the blame.",
+    "Debugging is at least twice as hard as writing the program in the first place.",
+    "So if your code is as clever as you can possibly make it, then by definition you're not smart enough to debug it.",
+    "For any given software, the moment you manage to master it, a new version appears.",
+    "A patch is a piece of software which replaces old bugs with new bugs.",
+    "The chances of a program doing what it's supposed to do is inversely proportional to the number of lines of code used to write it.",
+    "The amount of time taken to successfully complete a software project is in direct proportion to the amount of Marketing input.",
+    "The probability of bugs appearing is directly proportional to the number and importance of people watching.",
+    "Make a system even a moron can use and a moron will use it.",
+    "No matter how big a hard drive you buy, you'll need to double it in a year.",
+    "A computer is only as smart as the person using it.",
+    "Good enough - isn't, unless there is a deadline."
+    ]
 
 CHARLIESHEEN = [
     "Good luck on your travels. You're going to need it. Badly.",
@@ -1217,7 +1302,8 @@ CHARLIESHEEN = [
 	"I'm a peaceful man with bad intentions.",
 	"Sorry Middle America.",
 	"Who wants to deal with all the small talk?",
-	"Really dude? Really?", "The last time I used? What do you mean?  I used my toaster this morning.",
+	"Really dude? Really?",
+    "The last time I used? What do you mean?  I used my toaster this morning.",
 	"Everything. Next question.",
 	"Can I have one part of my life that isn't TMZ'd up the butt?",
 	"We need his wisdom and his bitchin'-ness.",
@@ -1491,6 +1577,10 @@ REGEX_STR_TRIGGER = {
         # Charlie Sheen (used to be www.livethesheendream.com, but that's
         # in flux)
         re.compile("(charlie ?sheen|goddess|winning|bree olson|tiger ?blood|warlock)", re.I) : CHARLIESHEEN,
+        # Murphy's Laws
+        re.compile("(murphy|law)", re.I) : MURPHY,
+        # Programming Quotes
+        re.compile("(code|debug|complex|simple)", re.I) : PROGRAMMING_QUOTES,
         # pirates
         re.compile("(pirate|ahoy|arrr|pillage|yarr|lagoon)", re.I) : [
                 "Sing A Chantey!",
@@ -1673,19 +1763,19 @@ REGEX_STR_TRIGGER = {
 REGEX_URL_TRIGGER = {
         re.compile("(bruce schneier|password|crypt|blowfish)", re.I) :
                         ( cmd_schneier, "http://www.schneierfacts.com/" ),
-        re.compile(".*(trivia|factual|factlet)", re.I) :
-                        ( cmd_trivia, "http://www.nicefacts.com/quickfacts/index.php" ),
+#        re.compile(".*(trivia|factual|factlet)", re.I) :
+#                        ( cmd_trivia, "http://www.nicefacts.com/quickfacts/index.php" ),
         re.compile("(shakespear|hamlet|Coriolanus|macbeth|romeo and juliet|merchant of venice|midsummer nicht's dream|henry V|as you like it|All's Well That Ends Well|Comedy of Errors|Cymbeline|Love's Labours Lost|Measure for Measure|Merry Wives of Windsor|Much Ado About Nothing|Pericles|Prince of Tyre|Taming of the Shrew|Tempest|Troilus|Cressida|Twelfth Night|two gentleman of verona|Winter's tale|henry IV|king john|richard II|antony and cleopatra|coriolanus|julius caesar|kind lear|othello|timon of athens|titus|andronicus)", re.I) :
                         ( cmd_shakespear, "http://www.pangloss.com/seidel/Shaker/index.html" ),
-        re.compile("(chuck|norris|walker|texas ranger|karate)", re.I) :
-                        ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=chuck" ),
-        re.compile("(a-?team|mr(\.? )?t|hannibal|murdock|Baracus)", re.I) :
-                        ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=mrt" ),
-        re.compile("(\bvin\b|diesel|fast and (the )?furious|riddick)", re.I) :
-                        ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=vin" ),
+#        re.compile("(chuck|norris|walker|texas ranger|karate)", re.I) :
+#                        ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=chuck" ),
+#        re.compile("(a-?team|mr(\.? )?t|hannibal|murdock|Baracus)", re.I) :
+#                        ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=mrt" ),
+#        re.compile("(\bvin\b|diesel|fast and (the )?furious|riddick)", re.I) :
+#                        ( cmd_factlet, "http://4q.cc/index.php?pid=atom&person=vin" ),
         re.compile("(ur([ _])mom|yourmom|m[oa]mma|[^ ]+'s mom)", re.I) :
                         ( cmd_yourmom, "http://www.ahajokes.com" ),
-        re.compile("(bug|insect|roach|spider|grasshopper)", re.I) :
+        re.compile("(insect|roach|spider|grasshopper)", re.I) :
                         ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/bugs" ),
         re.compile("\b(animal|cat|dog|horse|mammal|cow|chicken|lobster|bear)", re.I) :
                        ( randomLineFromUrl, "http://www.netmeister.org/apps/twitter/jbot/animals" ),
@@ -1709,6 +1799,7 @@ class Jbot(object):
         self.__opts = {
                     "cfg_file" : os.path.expanduser("~/.jbot/config"),
                     "debug" : False,
+                    "force" : False,
                     "user" : BOTNAME
                  }
         self.api = None
@@ -1731,6 +1822,7 @@ class Jbot(object):
             self.err = rval
             self.msg = 'Usage: %s [-dhv] [-u user]\n' % os.path.basename(sys.argv[0])
             self.msg += '\t-d          run in debug mode\n'
+            self.msg += '\t-f          force updates\n'
             self.msg += '\t-h          print this message and exit\n'
             self.msg += '\t-u user     run as this user\n'
             self.msg += '\t-v          increase verbosity\n'
@@ -1864,6 +1956,10 @@ class Jbot(object):
         except tweepy.error.TweepError, e:
             self.followfail = True
             self.handleTweepError(e, "Unable to get list of %s for %s" % (what, user))
+        except httplib.IncompleteRead:
+            self.verbose("httplib.IncompleteRead - aborting!")
+            sys.exit(EXIT_ERROR)
+
 
         return wanted
 
@@ -2065,13 +2161,15 @@ class Jbot(object):
         """
 
         try:
-            opts, args = getopt.getopt(inargs, "dhu:v")
+            opts, args = getopt.getopt(inargs, "dfhu:v")
         except getopt.GetoptError:
             raise self.Usage(EXIT_ERROR)
 
         for o, a in opts:
             if o in ("-d"):
                 self.setOpt("debug", True)
+            if o in ("-f"):
+                self.setOpt("force", True)
             if o in ("-h"):
                 raise self.Usage(EXIT_SUCCESS)
             if o in ("-u"):
@@ -2092,7 +2190,7 @@ class Jbot(object):
 
         self.verbose("Processing at-messages...", 2)
         try:
-            results = self.api.mentions(since_id=self.lastmessage)
+            results = self.api.mentions_timeline(since_id=self.lastmessage)
             for msg in results:
                 if msg.user.screen_name == BOTNAME:
                     continue
@@ -2103,7 +2201,7 @@ class Jbot(object):
                     ip = re.compile("(damm?n? you|shut ?up|die|(cram|stuff) it|piss ?off|(fuck|screw|hate) you|stupid|you (stink|blow)|go to hell|stfu|idiot|(you are|is) annoying|down boy)", re.I)
                     m = ip.match(msg.text)
                     if m:
-                        response = cmd_insult("!insult %s" % msg.user.screen_name, "")
+                        response = cmd_insult("!insult %s" % msg.user.screen_name, "http://www.randominsults.net/")
                         response = response.replace("@%s " % msg.user.screen_name, "", 1)
                     else:
                         for p in ELIZA_RESPONSES.keys():
@@ -2178,7 +2276,7 @@ class Jbot(object):
 
         self.verbose("Processing all of my followers messages...", 2)
         try:
-            results = self.api.friends_timeline(since_id=self.lastmessage, count=500)
+            results = self.api.home_timeline(since_id=self.lastmessage, count=500)
             for msg in results:
                 # friends_timeline gets our own messages, too, so let's
                 # ignore those
@@ -2187,6 +2285,9 @@ class Jbot(object):
                 self.processMessage(msg)
         except tweepy.error.TweepError, e:
             self.handleTweepError(e, "API friends_timeline error")
+        except httplib.IncompleteRead:
+            self.verbose("httplib.IncompleteRead - aborting!")
+            sys.exit(EXIT_ERROR)
 
 
     def processMessage(self, msg):
@@ -2311,7 +2412,7 @@ class Jbot(object):
             else:
                 self.api.update_status(msg, oid)
         except tweepy.error.TweepError, e:
-            sys.stderr.write("Unable to tweet '%s': %s\n" % (msg, e))
+            sys.stderr.write("Unable to tweet '%s': %s\n" % (repr(msg.decode("utf-8", "replace")), e))
 
 
     def tweetFuncResults(self, func, msg=None, link=None):
@@ -2404,7 +2505,8 @@ class Jbot(object):
                 sys.exit(EXIT_ERROR)
             elif len(gone_followers) > 25:
                 sys.stderr.write("Suspiciously large lost followers: %d\n" % len(gone_followers))
-                sys.exit(EXIT_ERROR)
+                if not self.getOpt("force"):
+                    sys.exit(EXIT_ERROR)
             self.followOrUnfollow("unfollow", gone_followers)
 
         if len(new_followers):

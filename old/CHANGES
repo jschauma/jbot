@@ -1,3 +1,7 @@
+
+ * dehtmlify Bruce Schneier
+ * add '-f' to force certain things
+
 2012-04-29:
  * add !geoip
 

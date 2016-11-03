@@ -1,7 +1,9 @@
 This is a HipChat version of the 'jbot' IRC bot,
-originally "developed" at Yahoo! in 2007.  This
-variant was created as a rewrite in Go for HipChat
-in July 2016 by Jan Schaumann (@jschauma /
+originally "developed" at Yahoo! in 2007, and which
+can be found in the 'old/irc' subdir.
+
+This variant was created as a rewrite in Go for
+HipChat in July 2016 by Jan Schaumann (@jschauma /
 jschauma@netmeister.org).  Many thanks to Yahoo for
 letting me play around with nonsense like this.
 

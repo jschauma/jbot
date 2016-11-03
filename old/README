@@ -1,0 +1,5 @@
+'jbot' was, first and foremost, an IRC bot (found in
+the 'irc' subdir).  It then quantum leaped onto
+Twitter, although that never really worked out very
+well.  The twitter version can be found in the
+'twitter' subdir.
