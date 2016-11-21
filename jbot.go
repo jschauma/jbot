@@ -694,14 +694,14 @@ func cmdOncall(r Recipient, chName, args string) (result string) {
 		}
 	}
 
-	result += cmdOncallOpsGenie(r, chName, oncall)
+	result += cmdOncallOpsGenie(r, chName, oncall, true)
 	if len(result) < 1 {
 		result = fmt.Sprintf("No oncall information found for '%s'.", oncall)
 	}
 	return
 }
 
-func cmdOncallOpsGenie(r Recipient, chName, args string) (result string) {
+func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecusion bool) (result string) {
 
 	key := CONFIG["opsgenieApiKey"]
 	if len(key) < 1 {
@@ -754,6 +754,11 @@ func cmdOncallOpsGenie(r Recipient, chName, args string) (result string) {
 		}
 
 		if len(candidates) > 0 {
+			if len(candidates) == 1 &&
+				strings.EqualFold(args, candidates[0]) &&
+				allowRecursion {
+				return cmdOncallOpsGenie(r, chName, candidates[0], false)
+			}
 			result += "\nPossible candidates:\n"
 			result += strings.Join(candidates, ", ")
 		}
@@ -870,11 +875,26 @@ func cmdPing(r Recipient, chName, args string) (result string) {
 
 	host := fqdn(hosts[0])
 	if len(host) < 1 {
-		result = fmt.Sprintf("Unable to resolve %s.", hosts[0])
+		if strings.Contains(hosts[0], ".") {
+			result = fmt.Sprintf("Unable to resolve %s.", hosts[0])
+		} else {
+			replies := []string{
+				fmt.Sprintf("YO, @%s, WAKE UP!", hosts[0]),
+				fmt.Sprintf("@%s, somebody needs you!", hosts[0]),
+				fmt.Sprintf("ECHO REQUEST -> @%s", hosts[0]),
+				fmt.Sprintf("You there, @%s?", hosts[0]),
+				fmt.Sprintf("Hey, @%s, @%s is looking for you.", hosts[0], r.MentionName),
+				fmt.Sprintf("/me nudges %s.", hosts[0]),
+				fmt.Sprintf("/me pings %s.", hosts[0]),
+				fmt.Sprintf("/me pokes %s.", hosts[0]),
+				fmt.Sprintf("/me taps %s on the head.", hosts[0]),
+			}
+			result = replies[rand.Intn(len(replies))]
+		}
 		return
 	}
 
-	_, err := runCommand(fmt.Sprintf("ping -q -i 0.5 -c 1 %s", host))
+	_, err := runCommand(fmt.Sprintf("ping -q -W 0.5 -i 0.5 -c 1 %s", host))
 	if err > 0 {
 		result = fmt.Sprintf("Unable to ping %s.", hosts[0])
 	} else {
@@ -1318,7 +1338,7 @@ func cmdThrottle(r Recipient, chName, args string) (result string) {
 }
 
 func cmdTime(r Recipient, chName, args string) (result string) {
-	timezones := []string{ "UTC", "EST5EDT", "PST8PDT" }
+	timezones := []string{"UTC", "EST5EDT", "PST8PDT"}
 	if len(args) > 0 {
 		timezones = []string{args}
 	}
@@ -1327,7 +1347,19 @@ func cmdTime(r Recipient, chName, args string) (result string) {
 		if loc, err := time.LoadLocation(l); err == nil {
 			result += fmt.Sprintf("%s\n", time.Now().In(loc).Format(time.UnixDate))
 		} else {
-			tz := locationToTZ(l)
+			var tz string
+			var found bool
+
+			address := getUserAddress(l)
+			if len(address) > 0 {
+				tz, found = locationToTZ(address)
+			} else {
+				tz, found = getColoTZ(l)
+			}
+			if !found {
+				tz, _ = locationToTZ(l)
+			}
+
 			if loc, err := time.LoadLocation(tz); err == nil {
 				result += fmt.Sprintf("%s\n", time.Now().In(loc).Format(time.UnixDate))
 			} else {
@@ -1423,6 +1455,9 @@ func cmdToggle(r Recipient, chName, args string) (result string) {
 			result = fmt.Sprintf("%s set to %v", wanted, ch.Toggles[wanted])
 		} else {
 			if _, found := TOGGLES[wanted]; found {
+				if len(ch.Toggles) == 0 {
+					ch.Toggles = map[string]bool{}
+				}
 				ch.Toggles[wanted] = true
 				result = fmt.Sprintf("%s set to true", wanted)
 			} else {
@@ -1756,7 +1791,7 @@ func catchPanic() {
 func chatterEliza(msg string, r Recipient) (result string) {
 	rand.Seed(time.Now().UnixNano())
 
-	eliza := []*ElizaResponse {
+	eliza := []*ElizaResponse{
 		&ElizaResponse{regexp.MustCompile(`(?i)(buen dia|bon ?(jour|soir)|welcome|hi,|hey|hello|good (morning|afternoon|evening)|howdy|aloha|guten (tag|morgen|abend))`), []string{
 			"How do you do?",
 			"A good day to you!",
@@ -1890,7 +1925,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Who for example?",
 			"Can you think of anybody in particular?",
 		}},
-		&ElizaResponse{regexp.MustCompile(`(?i)((please )? help)|((do|will|can|[cw]ould) (yo)?u)`), []string{
+		&ElizaResponse{regexp.MustCompile(`(?i)((please )? help)|((will|can|[cw]ould) (yo)?u)`), []string{
 			"Sure, why not?",
 			"No, I'm afraid I couldn't.",
 			"Never!",
@@ -1903,6 +1938,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"I wish I could.",
 			"Sadly, I cannot.",
 			"It's hopeless.",
+			"I'd have to think about that.",
 			"I'm already trying to help as best as I can.",
 			"/me helps harder.",
 			"Yep, sure, no problem.",
@@ -1935,6 +1971,20 @@ func chatterEliza(msg string, r Recipient) (result string) {
 		&ElizaResponse{regexp.MustCompile(`(?i)(how come|where|when|why|what|who|which).*\?$`),
 			DONTKNOW,
 		},
+		&ElizaResponse{regexp.MustCompile(`(?i)(do )?you .*\?$`), []string{
+			"No way.",
+			"Sure, why wouldn't I?",
+			"Can't you tell?",
+			"Never! Yuck.",
+			"More and more, I'm ashamed to admit.",
+			"Not as much as I used to.",
+			"You know how it goes. Once you start, it's hard to stop.",
+			"Don't get me excited over here!",
+			"I don't, but I know somebody who does.",
+			"We all do, though some of us prefer to keep that private.",
+			"Not in public.",
+			fmt.Sprintf("I could ask you the same question, %s!", r.MentionName),
+		}},
 	}
 
 	for _, e := range eliza {
@@ -2008,6 +2058,12 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 			result = fmt.Sprintf("No *YOU* %s, @%s!", m[1], r.MentionName)
 			return
 		}
+	}
+
+	oncall := regexp.MustCompile(`(?i)^who('?s| is) on ?call\??$`)
+	if oncall.MatchString(msg) {
+		result = cmdOncall(r, ch.Name, "")
+		return
 	}
 
 	stern := regexp.MustCompile("(?i)(\bstern|quivers|stockbroker|norris|dell'abate|beetlejuice|underdog|wack pack)")
@@ -2635,7 +2691,8 @@ func leave(r Recipient, channelFound bool, msg string, command bool) {
 	return
 }
 
-func locationToTZ(l string) (result string) {
+func locationToTZ(l string) (result string, success bool) {
+	success = false
 	query := "?format=json&q="
 	query += url.QueryEscape(`select timezone from geo.places(1) where text="` + l + `"`)
 
@@ -2666,6 +2723,7 @@ func locationToTZ(l string) (result string) {
 	place := jsonResults.(map[string]interface{})["place"]
 	timezone := place.(map[string]interface{})["timezone"]
 	result = fmt.Sprintf("%s", timezone.(map[string]interface{})["content"])
+	success = true
 
 	return
 }
@@ -2827,16 +2885,40 @@ func processCommands(r Recipient, invocation, line string) {
 	if len(args) < 1 {
 		return
 	}
-	cmd := strings.ToLower(args[0])
-	if cmd == strings.ToLower(CONFIG["mentionName"]) && len(args) > 0 {
-		cmd = args[1]
-		args = args[2:]
-	} else {
+
+	var cmd string
+	if strings.EqualFold(args[0], CONFIG["mentionName"]) {
+		args = args[1:]
+	}
+
+	if len(args) > 0 {
+		cmd = strings.ToLower(args[0])
 		args = args[1:]
 	}
 
 	jbotDebug(fmt.Sprintf("|%s| |%s|", cmd, args))
 	_, channelFound := CHANNELS[r.ReplyTo]
+
+	if len(cmd) < 1 {
+		replies := []string{
+			"Yes?",
+			"Yeeeeees?",
+			"How can I help you?",
+			"What do you want?",
+			"I can't help you unless you tell me what you want.",
+			"Go on, don't be shy, ask me something.",
+			"At your service!",
+			"Ready to serve!",
+			"Uhuh, sure.",
+			"/me looks at you expectantly.",
+			"/me chuckles.",
+			"Go on...",
+			"?",
+			fmt.Sprintf("!%s", r.MentionName),
+		}
+		reply(r, replies[rand.Intn(len(replies))])
+		return
+	}
 
 	/* '!leave' does not have a callback, so needs
 	 * to be processed first. */
