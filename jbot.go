@@ -592,7 +592,7 @@ func cmdInsult(r Recipient, chName, args string) (result string) {
 	rand.Seed(time.Now().UnixNano())
 	if rand.Intn(2) == 0 {
 		url := URLS["insults"]
-		result += randomLineFromUrl(url, true)
+		result += randomLineFromUrl(url, false)
 	} else {
 		data := getURLContents(COMMANDS["insult"].How, false)
 		found := false
@@ -701,7 +701,7 @@ func cmdOncall(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecusion bool) (result string) {
+func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (result string) {
 
 	key := CONFIG["opsgenieApiKey"]
 	if len(key) < 1 {
@@ -964,7 +964,7 @@ func cmdPraise(r Recipient, chName, args string) (result string) {
 			result = THANKYOU[rand.Intn(len(THANKYOU))]
 		} else {
 			result = fmt.Sprintf("%s: %s\n", args,
-				randomLineFromUrl(COMMANDS["praise"].How, true))
+				randomLineFromUrl(COMMANDS["praise"].How, false))
 		}
 	}
 	return
@@ -1218,7 +1218,7 @@ func cmdSpeb(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	result = randomLineFromUrl(COMMANDS["speb"].How, true)
+	result = randomLineFromUrl(COMMANDS["speb"].How, false)
 	return
 }
 
@@ -1345,6 +1345,8 @@ func cmdTime(r Recipient, chName, args string) (result string) {
 
 	for _, l := range timezones {
 		if loc, err := time.LoadLocation(l); err == nil {
+			result += fmt.Sprintf("%s\n", time.Now().In(loc).Format(time.UnixDate))
+		} else if loc, err := time.LoadLocation(strings.ToUpper(l)); err == nil {
 			result += fmt.Sprintf("%s\n", time.Now().In(loc).Format(time.UnixDate))
 		} else {
 			var tz string
@@ -1474,7 +1476,7 @@ func cmdTrivia(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	result = randomLineFromUrl(COMMANDS["trivia"].How, true)
+	result = randomLineFromUrl(COMMANDS["trivia"].How, false)
 	return
 }
 
@@ -1549,6 +1551,42 @@ func cmdUnset(r Recipient, chName, args string) (result string) {
 		result = fmt.Sprintf("No such setting: '%s'.", args)
 	}
 
+	return
+}
+
+func cmdUnthrottle(r Recipient, chName, args string) (result string) {
+	if len(args) < 1 {
+		result = "Usage: " + COMMANDS["unthrottle"].Usage
+		return
+	}
+
+	var ch *Channel
+	var found bool
+	if ch, found = CHANNELS[chName]; !found {
+		result = "I can only throttle things in a channel."
+		return
+	}
+
+	if args == "*" || args == "everything" {
+		for t, _ := range ch.Throttles {
+			delete(ch.Throttles, t)
+		}
+	} else {
+		delete(ch.Throttles, args)
+	}
+
+	replies := []string{
+			"Okiley, dokiley!",
+			"Sure thing, my friend!",
+			"Done.",
+			"No problemo.",
+			"/me throttles that thang.",
+			"Got it.",
+			"Word.",
+			"Unthrottled to the max!",
+			"Consider it done.",
+			}
+	result = replies[rand.Intn(len(replies))]
 	return
 }
 
@@ -1812,7 +1850,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Huh? What? I'm awake! Who said that?",
 			fmt.Sprintf("Oh, hi there, %s!", r.MentionName),
 		}},
-		&ElizaResponse{regexp.MustCompile(`(?i)(have a (nice|good)|adios|au revoir|sayonara|bye ?bye|good(bye| ?night)|hasta (ma.ana|luego))`), []string{
+		&ElizaResponse{regexp.MustCompile(`(?i)(have a (nice|good)|adios|au revoir|sayonara|bye( ?bye)?|later|good(bye| ?night)|hasta (ma.ana|luego))`), []string{
 			"You're leaving so soon?",
 			fmt.Sprintf("Don't leave us, %s!", r.MentionName),
 			"Buh-bye!",
@@ -1965,7 +2003,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Yo, @<2>, wake up!",
 			"@<2>, you there?",
 		}},
-		&ElizaResponse{regexp.MustCompile(`(?i)(best|bravo|well done|you rock|good job|nice|i love( you)?)`),
+		&ElizaResponse{regexp.MustCompile(`(?i)(best|bravo|well done|you rock|good job|nice|(i )?love( you)?)`),
 			THANKYOU,
 		},
 		&ElizaResponse{regexp.MustCompile(`(?i)(how come|where|when|why|what|who|which).*\?$`),
@@ -1990,6 +2028,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 	for _, e := range eliza {
 		pattern := e.Re
 		replies := e.Responses
+
 		if m := pattern.FindStringSubmatch(msg); len(m) > 0 {
 			r := replies[rand.Intn(len(replies))]
 			for n := 0; n < len(m); n++ {
@@ -2000,28 +2039,28 @@ func chatterEliza(msg string, r Recipient) (result string) {
 		}
 	}
 
-	result = randomLineFromUrl(URLS["eliza"], true)
+	result = randomLineFromUrl(URLS["eliza"], false)
 	return
 }
 
 func chatterH2G2(msg string) (result string) {
 	patterns := map[*regexp.Regexp]string{
-		regexp.MustCompile("(?i)foolproof"):               "A common mistake that people make when trying to design something completely foolproof is to underestimate the ingenuity of complete fools.",
-		regexp.MustCompile("(?i)my ego"):                  "If there's anything more important than my ego around here, I want it caught and shot now!",
-		regexp.MustCompile("(?i)universe"):                "I always said there was something fundamentally wrong with the universe.",
-		regexp.MustCompile("(?i)giveaway"):                "`Oh dear,' says God, `I hadn't thought of  that,' and promptly vanished in a puff of logic.",
 		regexp.MustCompile("(?i)don't panic"):             "It's the first helpful or intelligible thing anybody's said to me all day.",
-		regexp.MustCompile("(?i)new yorker"):              "The last time anybody made a list of the top hundred character attributes of New Yorkers, common sense snuck in at number 79.",
-		regexp.MustCompile("(?i)potato"):                  "It is a mistake to think you can solve any major problem just with potatoes.",
-		regexp.MustCompile("(?i)grapefruit"):              "Life... is like a grapefruit. It's orange and squishy, and has a few pips in it, and some folks have half a one for breakfast.",
-		regexp.MustCompile("(?i)don't remember anything"): "Except most of the good bits were about frogs, I remember that.  You would not believe some of the things about frogs.",
-		regexp.MustCompile("(?i)ancestor"):                "There was an accident with a contraceptive and a time machine. Now concentrate!",
 		regexp.MustCompile("(?i)makes no sense at all"):   "Reality is frequently inaccurate.",
-		regexp.MustCompile("(?i)apple products"):          "It is very easy to be blinded to the essential uselessness of them by the sense of achievement you get from getting them to work at all.",
-		regexp.MustCompile("(?i)philosophy"):              "Life: quite interesting in parts, but no substitute for the real thing",
 	}
 
 	anyreply := []string{
+		"A common mistake that people make when trying to design something completely foolproof is to underestimate the ingenuity of complete fools.",
+		"If there's anything more important than my ego around here, I want it caught and shot now!",
+		"I always said there was something fundamentally wrong with the universe.",
+		"`Oh dear,' says God, `I hadn't thought of  that,' and promptly vanished in a puff of logic.",
+		"The last time anybody made a list of the top hundred character attributes of New Yorkers, common sense snuck in at number 79.",
+		"It is a mistake to think you can solve any major problem just with potatoes.",
+		"Life... is like a grapefruit. It's orange and squishy, and has a few pips in it, and some folks have half a one for breakfast.",
+		"Except most of the good bits were about frogs, I remember that.  You would not believe some of the things about frogs.",
+		"There was an accident with a contraceptive and a time machine. Now concentrate!",
+		"It is very easy to be blinded to the essential uselessness of them by the sense of achievement you get from getting them to work at all.",
+		"Life: quite interesting in parts, but no substitute for the real thing",
 		"I love deadlines. I like the whooshing sound they make as they fly by.",
 		"What do you mean, why has it got to be built? It's a bypass. Got to build bypasses.",
 		"Time is an illusion, lunchtime doubly so.",
@@ -2031,7 +2070,7 @@ func chatterH2G2(msg string) (result string) {
 		"Listen, three eyes, don't you try to outweird me.  I get stranger things than you free with my breakfast cereal.",
 	}
 
-	anypattern := regexp.MustCompile("\b42\b|arthur dent|slartibartfast|zaphod|beeblebrox|ford prefect|hoopy|trillian|zarniwoop")
+	anypattern := regexp.MustCompile("\b42\b|arthur dent|slartibartfast|zaphod|beeblebrox|ford prefect|hoopy|trillian|zarniwoop|foolproof|my ego|universe|giveaway|new yorker|potato|grapefruit|don't remember anything|ancestor|apple products|philosophy")
 
 	for p, r := range patterns {
 		anyreply = append(anyreply, r)
@@ -2079,7 +2118,8 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	}
 
 	wutang := regexp.MustCompile(`(?i)(tang|wu-|shaolin|kill(er|ah) bee[sz]|liquid sword|cuban lin(ks|x))`)
-	if wutang.MatchString(msg) && !isThrottled("wutang", ch) {
+	noattang := regexp.MustCompile(`(?i)@\w*tang`)
+	if wutang.MatchString(msg) && !noattang.MatchString(msg) && !isThrottled("wutang", ch) {
 		replies := []string{
 			"Do you think your Wu-Tang sword can defeat me?",
 			"Unguard, I'll let you try my Wu-Tang style.",
@@ -2407,6 +2447,11 @@ func createCommands() {
 		"unset a channel setting",
 		"builtin",
 		"!unset name",
+	COMMANDS["unthrottle"] = &Command{cmdUnthrottle,
+		"unset a throttle",
+		"builtin",
+		"!unthrottle <throttle> -- remove given throttle for this channel\n" +
+			"Note: I will happily pretend to unthrottle throttles I don't know or care about.",
 		nil}
 	COMMANDS["user"] = &Command{cmdUser,
 		"show information about the given HipChat user",
@@ -2820,7 +2865,7 @@ func processChatter(r Recipient, msg string, forUs bool) {
 	 * be enabled.  If a message contains our
 	 * name, then we may respond only if 'chatter'
 	 * is not toggled off. */
-	mentioned_re := regexp.MustCompile(fmt.Sprintf("(?i)(^( *|yo,? ?|hey,? ?)%s[,:]?)|(,? *%s[.?!]?$)", CONFIG["mentionName"], CONFIG["mentionName"]))
+	mentioned_re := regexp.MustCompile(fmt.Sprintf("(?i)(^( *|yo,? ?|hey,? ?)%s[,:]?)|(,? *%s *[.?!]?$)|(.* *%s *[.?!].*)", CONFIG["mentionName"], CONFIG["mentionName"], CONFIG["mentionName"]))
 	mentioned := mentioned_re.MatchString(msg)
 
 	jbotDebug(fmt.Sprintf("forUs: %v; chatter: %v; mentioned: %v\n", forUs, ch.Toggles["chatter"], mentioned))
@@ -3209,13 +3254,14 @@ func wasInsult(msg string) (result bool) {
 
 	var insultPatterns = []*regexp.Regexp{
 		regexp.MustCompile(fmt.Sprintf("(?i)fu[, ]@?%s", CONFIG["mentionName"])),
+		regexp.MustCompile(fmt.Sprintf("(?i)@?%s su(cks|x)", CONFIG["mentionName"])),
 		regexp.MustCompile("(?i)asshole|bitch|dickhead"),
 		regexp.MustCompile("(?i)dam+n? (yo)?u"),
 		regexp.MustCompile("(?i)shut ?(the fuck )?up"),
 		regexp.MustCompile("(?i)(screw|fuck) (yo)u"),
 		regexp.MustCompile("(?i)(piss|bugger) ?off"),
 		regexp.MustCompile("(?i)fuck (off|(yo)u)"),
-		regexp.MustCompile("(?i)(yo)?u (suck|blow|are (useless|lame|dumb|stupid|stink))"),
+		regexp.MustCompile("(?i)(yo)?u (suck|blow|are ((very|so+) )?(useless|lame|dumb|stupid|stink))"),
 		regexp.MustCompile("(?i)(stfu|go to hell)"),
 		regexp.MustCompile("(?i) is (stupid|dumb|annoying|lame|boring|useless)"),
 		regexp.MustCompile(fmt.Sprintf("(?i)(stupid|annoying|lame|boring|useless) +(%s|bot)", CONFIG["mentionName"])),
