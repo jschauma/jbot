@@ -96,20 +96,22 @@ var ROOMS = map[string]*hipchat.Room{}
 var ROSTER = map[string]*hipchat.User{}
 
 var TOGGLES = map[string]bool{
-	"chatter": true,
-	"python":  true,
-	"trivia":  true,
+	"chatter":     true,
+	"python":      true,
+	"trivia":      true,
+	"shakespeare": true,
 }
 
 var URLS = map[string]string{
-	"eliza":   "https://XXX-SOME-LINK-WITH-WITTY-REPLIES-HERE-XXX",
-	"insults": "https://XXX-SOME-LINK-WITH-VARIOUS-INUSLTS-HERE-XXX",
-	"jbot":    "https://github.com/jschauma/jbot/",
-	"jira":    "https://XXX-YOUR-JIRA-DOMAIN-HERE-XXX",
-	"praise":  "http://XXX-YOUR-PRAISE-URL-HERE-XXX/",
-	"speb":    "https://XXX-SOME-LINK-WITH-ALL-SPEB-REPLIES-HERE-XXX",
-	"trivia":  "https://XXX-SOME-LINK-WITH-VARIOUS-TRIVIA-SNIPPETS-HERE-XXX",
-	"yql":     "https://query.yahooapis.com/v1/public/yql",
+	"eliza":       "https://XXX-SOME-LINK-WITH-WITTY-REPLIES-HERE-XXX",
+	"insults":     "https://XXX-SOME-LINK-WITH-VARIOUS-INUSLTS-HERE-XXX",
+	"jbot":        "https://github.com/jschauma/jbot/",
+	"jira":        "https://XXX-YOUR-JIRA-DOMAIN-HERE-XXX",
+	"praise":      "https://XXX-YOUR-PRAISE-URL-HERE-XXX/",
+	"shakespeare": "https://XXX-SOME-LINK-WITH-SHAKESPEARE-QUOTES-HERE",
+	"speb":        "https://XXX-SOME-LINK-WITH-ALL-SPEB-REPLIES-HERE-XXX",
+	"trivia":      "https://XXX-SOME-LINK-WITH-VARIOUS-TRIVIA-SNIPPETS-HERE-XXX",
+	"yql":         "https://query.yahooapis.com/v1/public/yql",
 }
 
 var THANKYOU = []string{
@@ -1699,6 +1701,18 @@ func cmdWeather(r Recipient, chName, args string) (result string) {
 		return
 	}
 
+	address := getUserAddress(args)
+	if len(address) > 0 {
+		args = address
+	} else {
+		var unused Recipient
+		coloInfo := cmdColo(unused, "", args)
+		r := regexp.MustCompile(`(?m)Location\s+: (.+)`)
+		if m := r.FindStringSubmatch(coloInfo); len(m) > 0 {
+			args = m[1]
+		}
+	}
+
 	query := "?format=json&q="
 	query += url.QueryEscape(`select * from weather.forecast where woeid in (select woeid from geo.places(1) where text="` +
 		args + `")`)
@@ -2099,6 +2113,12 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 		}
 	}
 
+	trivia_re := regexp.MustCompile(`(trivia|factlet)`)
+	if trivia_re.MatchString(msg) && ch.Toggles["trivia"] && !isThrottled("trivia", ch) {
+		reply(r, cmdTrivia(r, r.ReplyTo, ""))
+		return
+	}
+
 	oncall := regexp.MustCompile(`(?i)^who('?s| is) on ?call\??$`)
 	if oncall.MatchString(msg) {
 		result = cmdOncall(r, ch.Name, "")
@@ -2150,6 +2170,26 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 
 	if strings.Contains(msg, "jebus") && !isThrottled("jebus", ch) {
 		result = "It's supposed to be 'Jesus', isn't it?  I'm pretty sure it is..."
+		return
+	}
+
+	shakespeare := regexp.MustCompile(`(?i)(shakespear|hamlet|macbeth|romeo and juliet|merchant of venice|midsummer night's dream|henry V|as you like it|All's Well That Ends Well|Comedy of Errors|Cymbeline|Love's Labours Lost|Measure for Measure|Merry Wives of Windsor|Much Ado About Nothing|Pericles|Prince of Tyre|Taming of the Shrew|Tempest|Troilus|Cressida|(Twelf|)th Night|gentlemen of verona|Winter's tale|henry IV|king john|richard II|anth?ony and cleopatra|coriolanus|julius caesar|king lear|othello|timon of athens|titus|andronicus)`)
+	if shakespeare.MatchString(msg) && ch.Toggles["shakespeare"] && !isThrottled("shakespeare", ch) {
+		result = randomLineFromUrl(URLS["shakespeare"], false)
+		return
+	}
+
+	loveboat := regexp.MustCompile(`(?i)(love ?boat|(Captain|Merrill) Stubing|cruise ?ship|ocean ?liner)`)
+	if loveboat.MatchString(msg) && !isThrottled("loveboat", ch) {
+		replies := []string{
+			"Love, exciting and new... Come aboard.  We're expecting you.",
+			"Love, life's sweetest reward.  Let it flow, it floats back to you.",
+			"The Love Boat, soon will be making another run.",
+			"The Love Boat promises something for everyone.",
+			"Set a course for adventure, Your mind on a new romance.",
+			"Love won't hurt anymore; It's an open smile on a friendly shore.",
+		}
+		result = replies[rand.Intn(len(replies))]
 		return
 	}
 
@@ -2447,6 +2487,7 @@ func createCommands() {
 		"unset a channel setting",
 		"builtin",
 		"!unset name",
+		nil}
 	COMMANDS["unthrottle"] = &Command{cmdUnthrottle,
 		"unset a throttle",
 		"builtin",
@@ -2520,6 +2561,14 @@ func doTheHipChat() {
 	for _, ch := range CHANNELS {
 		verbose(fmt.Sprintf("Joining #%s...", ch.Name), 1)
 		HIPCHAT_CLIENT.Join(ch.Jid, CONFIG["fullName"])
+		for t, v := range TOGGLES {
+			if len(ch.Toggles) == 0 {
+				ch.Toggles = map[string]bool{}
+			}
+			if _, found := ch.Toggles[t]; !found {
+				ch.Toggles[t] = v
+			}
+		}
 	}
 
 	go periodics()
@@ -2869,18 +2918,6 @@ func processChatter(r Recipient, msg string, forUs bool) {
 	mentioned := mentioned_re.MatchString(msg)
 
 	jbotDebug(fmt.Sprintf("forUs: %v; chatter: %v; mentioned: %v\n", forUs, ch.Toggles["chatter"], mentioned))
-
-	trivia_re := regexp.MustCompile(`(trivia|factlet)`)
-	if trivia_re.MatchString(msg) {
-		if found {
-			if !(ch.Toggles["chatter"] && ch.Toggles["trivia"]) ||
-				isThrottled("trivia", ch) {
-				return
-			}
-		}
-		reply(r, cmdTrivia(r, r.ReplyTo, ""))
-		return
-	}
 
 	if wasInsult(msg) && (forUs ||
 		(ch.Toggles["chatter"] && mentioned)) {
