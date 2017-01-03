@@ -237,6 +237,35 @@ func cmdAsn(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdBacon(r Recipient, chName, args string) (result string) {
+	pic := false
+	query := "bacon"
+	if len(args) > 0 {
+		query += " " + args
+		pic = true
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	if pic || rand.Intn(4) == 0 {
+		result = cmdImage(r, chName, query)
+	} else {
+		data := getURLContents("http://baconipsum.com/?paras=1&type=all-meat", false)
+		bacon_re := regexp.MustCompile(`anyipsum-output">(.*?\.)`)
+		for _, line := range strings.Split(string(data), "\n") {
+			if m := bacon_re.FindStringSubmatch(line); len(m) > 0 {
+				result = dehtmlify(m[1])
+				break
+			}
+		}
+	}
+
+	if len(result) < 1 {
+		result = "Ugh, I'm afraid I'm all out of bacon right now."
+	}
+
+	return
+}
+
 func cmdChannels(r Recipient, chName, args string) (result string) {
 	var channels []string
 
@@ -528,6 +557,29 @@ func cmdHow(r Recipient, chName, args string) (result string) {
 	} else {
 		rand.Seed(time.Now().UnixNano())
 		result = DONTKNOW[rand.Intn(len(DONTKNOW))]
+	}
+
+	return
+}
+
+func cmdImage(r Recipient, chName, args string) (result string) {
+	if len(args) < 1 {
+		result = "Usage: " + COMMANDS["img"].Usage
+		return
+	}
+
+	theUrl := fmt.Sprintf("%s%s", COMMANDS["img"].How, url.QueryEscape(args))
+	data := getURLContents(theUrl, false)
+
+	imgurl_re := regexp.MustCompile(`imgurl=(.*?)&`)
+	for _, line := range strings.Split(string(data), "\n") {
+		m := imgurl_re.FindAllStringSubmatch(line, -1)
+		if len(m) > 0 {
+			rand.Seed(time.Now().UnixNano())
+			onePic := m[rand.Intn(len(m))]
+			url, _ := url.QueryUnescape(onePic[1])
+			result = "http://" + url
+		}
 	}
 
 	return
@@ -2308,6 +2360,11 @@ func createCommands() {
 		"whois -h whois.cymru.com",
 		"!asn [<host>|<ip>|<asn>)",
 		nil}
+	COMMANDS["bacon"] = &Command{cmdBacon,
+		"everybody needs more bacon",
+		"mostly pork",
+		"!bacon",
+		nil}
 	COMMANDS["channels"] = &Command{cmdChannels,
 		"display channels I'm in",
 		"builtin",
@@ -2358,6 +2415,11 @@ func createCommands() {
 		"builtin",
 		"!how <command>",
 		nil}
+	COMMANDS["img"] = &Command{cmdImage,
+		"post a link to an image",
+		"https://images.search.yahoo.com/search/images?p=",
+		"!img <search term>",
+		[]string{"image", "pic"}}
 	COMMANDS["info"] = &Command{cmdInfo,
 		"display info about a channel",
 		"builtin",
@@ -2787,6 +2849,7 @@ func leave(r Recipient, channelFound bool, msg string, command bool) {
 
 func locationToTZ(l string) (result string, success bool) {
 	success = false
+
 	query := "?format=json&q="
 	query += url.QueryEscape(`select timezone from geo.places(1) where text="` + l + `"`)
 

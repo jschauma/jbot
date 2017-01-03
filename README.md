@@ -113,6 +113,13 @@ E.g.:
 16:20 <jbot> YAHOO-NE1 - Yahoo, US
 ```
 
+#### !bacon -- when you just need some more meat in your life
+
+```
+12:42 <jschauma> !bacon
+12:42 <jbot> Strip steak burgdoggen pork chop prosciutto tenderloin, brisket doner porchetta jowl pork ham hock meatloaf.
+```
+
 #### !channels -- display channels I'm in
 
 ```
@@ -239,6 +246,15 @@ Just like host(1).
 11:38 <jschauma> !how tld
 11:38 <jbot> whois -h whois.iana.org
 ```
+
+#### !img &lt;something&gt; -- fetch a link to an image
+Note: possibly NSFW
+
+```
+12:49 <jschauma> !img avocado
+12:49 <jbot> http://www.buyfruit.com.au/images/P/iStock_000002972468Small_%28avocado_-_shepard%29__31894.jpg
+```
+
 
 #### !info &lt;channel&gt; -- display info about a channel
 
