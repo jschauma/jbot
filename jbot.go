@@ -698,6 +698,11 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 	result += fmt.Sprintf("Status  : %s\n", status)
 	result += fmt.Sprintf("Created : %s\n", created)
 
+	resolved := fields.(map[string]interface{})["resolutiondate"]
+	if resolved != nil {
+		result += fmt.Sprintf("Resolved: %s\n", resolved)
+	}
+
 	assignee := fields.(map[string]interface{})["assignee"]
 	if assignee != nil {
 		name := assignee.(map[string]interface{})["name"]
@@ -828,7 +833,9 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 
 	for _, rot := range rotations {
 		rname := rot.(map[string]interface{})["name"].(string)
-		oncall[rname] = make([]string, 0)
+		if len(oncall[rname]) < 1 {
+			oncall[rname] = make([]string, 0)
+		}
 		if len(rname) > maxlen {
 			maxlen = len(rname)
 		}
