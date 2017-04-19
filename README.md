@@ -120,6 +120,19 @@ E.g.:
 12:42 <jbot> Strip steak burgdoggen pork chop prosciutto tenderloin, brisket doner porchetta jowl pork ham hock meatloaf.
 ```
 
+#### !beer -- obey your thirst
+
+```
+20:57 <@jschauma> !beer
+20:57 < jbot> AleSmith Speedway Stout by AleSmith Brewing Company - 4.37
+20:57 < jbot> American Double / Imperial Stout (12.00%)
+20:57 < jbot> https://www.beeradvocate.com/beer/profile/396/3833/
+20:58 <@jschauma> !beer bacon
+20:58 < jbot> Maple Bacon Coffee Porter by Funky Buddha Brewery - 4.45
+20:58 < jbot> American Porter (6.40%)
+20:58 < jbot> https://www.beeradvocate.com/beer/profile/31805/62761/
+```
+
 #### !channels -- display channels I'm in
 
 ```

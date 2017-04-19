@@ -266,6 +266,90 @@ func cmdBacon(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdBeer(r Recipient, chName, args string) (result string) {
+	bType := "search"
+	theUrl := fmt.Sprintf("%ssearch/?qt=beer&q=", COMMANDS["beer"].How)
+	if len(args) < 1 {
+		bType = "top"
+		theUrl = fmt.Sprintf("%slists/top/", COMMANDS["beer"].How)
+	}
+
+	if args == "me" {
+		args = r.MentionName
+	}
+
+	theUrl += url.QueryEscape(args)
+	data := getURLContents(theUrl, false)
+
+	type Beer struct {
+		Abv      string
+		BeerType string
+		Brewery  string
+		Name     string
+		Rating   string
+		Url      string
+	}
+
+	var beer Beer
+
+	beer_re := regexp.MustCompile(`<ul><li><a href="/(beer/profile/[0-9]+/[0-9]+/)"><b>([^<]+)</b></a><br><a href="/beer/profile/[0-9]+/">([^<]+)</a>`)
+	top_re := regexp.MustCompile(`<a href="/(beer/profile/[0-9]+/[0-9]+/)"><b>([^<]+)</b></a><div.*<a href="/beer/profile/[0-9]+/">([^<]+)</a><br><a href="/beer/style/[0-9]+/">([^<]+)</a> / ([^<]+) ABV</div></td><td[^>]+><b>([0-9.]+)</span>`)
+
+	for _, line := range strings.Split(string(data), "\n") {
+		if bType == "search" {
+			if m := beer_re.FindStringSubmatch(line); len(m) > 0 {
+				beer = Beer{"", "", m[3], m[2], "", m[1]}
+				theUrl = fmt.Sprintf("%s%s", COMMANDS["beer"].How, m[1])
+				data := getURLContents(theUrl, false)
+				style_re := regexp.MustCompile(`<b>Style:</b> <a href=.*><b>(.*)</b></a>`)
+				abv_re := regexp.MustCompile(`<b>Alcohol by volume \(ABV\):</b> (.*)`)
+				next := false
+				for _, l2 := range strings.Split(string(data), "\n") {
+					if strings.Contains(l2, "<dt>Avg:</dt>") {
+						next = true
+						continue
+					}
+					if next {
+						beer.Rating = dehtmlify(l2)
+						next = false
+					}
+					if m := abv_re.FindStringSubmatch(l2); len(m) > 0 {
+						beer.Abv = m[1]
+					}
+					if m := style_re.FindStringSubmatch(l2); len(m) > 0 {
+						beer.BeerType = m[1]
+					}
+				}
+				break
+			}
+		} else {
+			if strings.HasPrefix(line, "<tr><td align=") {
+				beers := []Beer{}
+				for _, l2 := range strings.Split(line, "</tr>") {
+					if m := top_re.FindStringSubmatch(l2); len(m) > 0 {
+						b := Beer{m[5], m[4], m[3], m[2], m[6], m[1]}
+						beers = append(beers, b)
+					}
+				}
+				if len(beers) > 0 {
+					rand.Seed(time.Now().UnixNano())
+					beer = beers[rand.Intn(len(beers))]
+				}
+			}
+		}
+	}
+
+	if len(beer.Name) > 0 {
+		result = fmt.Sprintf("%s by %s - %s\n", beer.Name, beer.Brewery, beer.Rating)
+		result += fmt.Sprintf("%s (%s)\n", beer.BeerType, beer.Abv)
+		result += fmt.Sprintf("%s%s\n", COMMANDS["beer"].How, beer.Url)
+	} else {
+		result = fmt.Sprintf("No beer found for '%s'.", args)
+	}
+
+	return
+}
+
 func cmdChannels(r Recipient, chName, args string) (result string) {
 	var channels []string
 
@@ -479,7 +563,7 @@ func cmdFml(r Recipient, chName, args string) (result string) {
 
 	data := getURLContents(COMMANDS["fml"].How, false)
 
-	fml_re := regexp.MustCompile(`(?i)>(Today, .*FML)<`)
+	fml_re := regexp.MustCompile(`(?i)^(Today, .*FML)<`)
 	for _, line := range strings.Split(string(data), "\n") {
 		m := fml_re.FindStringSubmatch(line)
 		if len(m) > 0 {
@@ -634,6 +718,7 @@ func cmdInfo(r Recipient, chName, args string) (result string) {
 func cmdInsult(r Recipient, chName, args string) (result string) {
 	if (len(args) > 0) &&
 		((strings.ToLower(args) == strings.ToLower(CONFIG["mentionName"])) ||
+		 (strings.ToLower(args) == "@" + strings.ToLower(CONFIG["mentionName"])) ||
 			(args == "yourself") ||
 			(args == "me")) {
 		result = fmt.Sprintf("@%s: ", r.MentionName)
@@ -1953,7 +2038,6 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			fmt.Sprintf("Пожалуйста, %s!", r.MentionName),
 			fmt.Sprintf("Proszę bardzo, %s!", r.MentionName),
 			"/me takes a bow.",
-
 		}},
 		&ElizaResponse{regexp.MustCompile(`(?i)(how are you|how do you feel|feeling|emotion|sensitive)`), []string{
 			"I'm so very happy today!",
@@ -2371,6 +2455,11 @@ func createCommands() {
 		"everybody needs more bacon",
 		"mostly pork",
 		"!bacon",
+		nil}
+	COMMANDS["beer"] = &Command{cmdBeer,
+		"quench your thirst",
+		"https://www.beeradvocate.com/",
+		"!beer <beer>",
 		nil}
 	COMMANDS["channels"] = &Command{cmdChannels,
 		"display channels I'm in",
@@ -2995,29 +3084,31 @@ func processChatter(r Recipient, msg string, forUs bool) {
 		return
 	}
 
-	chitchat = chatterMontyPython(msg)
-	if (len(chitchat) > 0) && ch.Toggles["chatter"] && ch.Toggles["python"] &&
-		!isThrottled("python", ch) {
-		reply(r, chitchat)
-		return
-	}
+	if ch.Toggles["chatter"] {
+		chitchat = chatterMontyPython(msg)
+		if (len(chitchat) > 0) && ch.Toggles["python"] &&
+			!isThrottled("python", ch) {
+			reply(r, chitchat)
+			return
+		}
 
-	chitchat = chatterSeinfeld(msg)
-	if (len(chitchat) > 0) && ch.Toggles["chatter"] && !isThrottled("seinfeld", ch) {
-		reply(r, chitchat)
-		return
-	}
+		chitchat = chatterSeinfeld(msg)
+		if (len(chitchat) > 0) && !isThrottled("seinfeld", ch) {
+			reply(r, chitchat)
+			return
+		}
 
-	chitchat = chatterH2G2(msg)
-	if (len(chitchat) > 0) && ch.Toggles["chatter"] && !isThrottled("h2g2", ch) {
-		reply(r, chitchat)
-		return
-	}
+		chitchat = chatterH2G2(msg)
+		if (len(chitchat) > 0) && !isThrottled("h2g2", ch) {
+			reply(r, chitchat)
+			return
+		}
 
-	chitchat = chatterMisc(msg, ch, r)
-	if len(chitchat) > 0 && ch.Toggles["chatter"] {
-		reply(r, chitchat)
-		return
+		chitchat = chatterMisc(msg, ch, r)
+		if len(chitchat) > 0 {
+			reply(r, chitchat)
+			return
+		}
 	}
 
 	if forUs || (ch.Toggles["chatter"] && mentioned) {
