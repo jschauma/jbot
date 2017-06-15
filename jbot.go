@@ -10,6 +10,8 @@
  * configuration file with suitable values.  The
  * following configuration values are required:
  *   password = the HipChat password of the bot user
+ *     OR
+ *   oauth_token = the HipChat Oauth token for the bot user
  *   hcName   = the HipChat company prefix, e.g. <foo>.hipchatcom
  *   jabberID = the HipChat / JabberID of the bot user
  *   fullName = how the bot presents itself
@@ -82,6 +84,7 @@ var CONFIG = map[string]string{
 	"hcName":         "",
 	"jabberID":       "",
 	"mentionName":    "",
+	"oauthToken":     "",
 	"opsgenieApiKey": "",
 	"password":       "",
 	"user":           "",
@@ -563,7 +566,7 @@ func cmdFml(r Recipient, chName, args string) (result string) {
 
 	data := getURLContents(COMMANDS["fml"].How, false)
 
-	fml_re := regexp.MustCompile(`(?i)^(Today, .*FML)<`)
+	fml_re := regexp.MustCompile(`(?i)^(Today, .*FML)$`)
 	for _, line := range strings.Split(string(data), "\n") {
 		m := fml_re.FindStringSubmatch(line)
 		if len(m) > 0 {
@@ -1289,6 +1292,18 @@ func cmdSeen(r Recipient, chName, args string) (result string) {
 		ch, found = CHANNELS[wanted[1]]
 	}
 
+	if strings.EqualFold(args, CONFIG["mentionName"]) {
+		rand.Seed(time.Now().UnixNano())
+		replies := []string{
+			"You can't see me, I'm not really here.",
+			"/me is invisible.",
+			"/me looked, but only saw its shadow.",
+			"Wed Dec 31 19:00:00 EST 1969",
+			}
+		result = replies[rand.Intn(len(replies))]
+		return
+	}
+
 	if !found {
 		if len(wanted) > 1 {
 			result = "I'm not currently in #" + wanted[1]
@@ -1645,28 +1660,22 @@ func cmdUd(r Recipient, chName, args string) (result string) {
 	}
 
 	data := getURLContents(theUrl, false)
-	next := false
+
+	ud_re := regexp.MustCompile(`(?i)<a class="word" .*>(.*)</a></div><div class="meaning">(.*)</div><div class="example">(.*)</div><div class="contributor"`)
 
 	for _, line := range strings.Split(string(data), "\n") {
-		if next {
-			result += dehtmlify(line) + "\n"
-			next = false
-		}
-
-		if strings.Contains(line, `<a class="word" `) {
-			if len(result) > 0 {
+		if m := ud_re.FindStringSubmatch(line); len(m) > 0 {
+			result = fmt.Sprintf("%s\n%s\nExample: %s",
+						dehtmlify(m[1]),
+						dehtmlify(m[2]),
+						dehtmlify(m[3]))
 				break
 			}
-			result = dehtmlify(line) + ": "
 		}
+	}
 
-		if strings.Contains(line, `<div class='meaning'>`) {
-			next = true
-		}
-		if strings.Contains(line, `<div class='example'>`) {
-			result += "Example: "
-			next = true
-		}
+	if len(result) < 1 {
+		result = fmt.Sprintf("Sorry, Urban Dictionary is useless when it comes to %s.", args)
 	}
 	return
 }
@@ -2160,7 +2169,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Yo, @<2>, wake up!",
 			"@<2>, you there?",
 		}},
-		&ElizaResponse{regexp.MustCompile(`(?i)(best|bravo|well done|you rock|good job|nice|(i )?love( you)?)`),
+		&ElizaResponse{regexp.MustCompile(`(?i)(best|bravo|well done|missed you|you rock|good job|nice|(i )?love( you)?)`),
 			THANKYOU,
 		},
 		&ElizaResponse{regexp.MustCompile(`(?i)(how come|where|when|why|what|who|which).*\?$`),
@@ -2256,7 +2265,7 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 		}
 	}
 
-	trivia_re := regexp.MustCompile(`(trivia|factlet)`)
+	trivia_re := regexp.MustCompile(`(trivia|factlet|anything interesting.*\?)`)
 	if trivia_re.MatchString(msg) && ch.Toggles["trivia"] && !isThrottled("trivia", ch) {
 		reply(r, cmdTrivia(r, r.ReplyTo, ""))
 		return
@@ -2296,6 +2305,22 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 		}
 		result = replies[rand.Intn(len(replies))]
 		return
+	}
+
+	yubifail := regexp.MustCompile(`eiddcc[a-z]{38}`)
+	if yubifail.MatchString(msg) && !isThrottled("yubifail", ch) {
+		replies := []string{
+			"Oh yeah? Well, uhm, eiddcceghkuikvdutuuibdgvbjcbrfjdvfhnbedkttur. So there.",
+			"That's the combination on my luggage!",
+			"#yubifail",
+			"You should double-rot13 that.",
+			"Uh-oh, now you're pwned.",
+			"s/^eidcc[a-z]*$/whoops/",
+			"Access denied!",
+			"Please try again later.",
+			"IF YOU DON'T SEE THE FNORD IT CAN'T EAT YOU",
+		}
+		result = replies[rand.Intn(len(replies))]
 	}
 
 	sleep := regexp.MustCompile(`(?i)^(to )?sleep$`)
@@ -2363,6 +2388,12 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	speb := regexp.MustCompile(`(?i)security ((problem )?excuse )?bingo`)
 	if speb.MatchString(msg) && !isThrottled("speb", ch) {
 		result = cmdSpeb(r, ch.Name, "")
+		return
+	}
+
+	beer := regexp.MustCompile(`(?i)b[ie]er( me)?$`)
+	if beer.MatchString(msg) {
+		result = cmdBeer(r, ch.Name, "")
 	}
 	return
 }
@@ -2706,8 +2737,15 @@ func doTheHipChat() {
 	CONFIG["domain"] = domain
 	CONFIG["domainPrefix"] = strings.Split(user, "_")[0]
 
+	authType := "plain"
+	pass := CONFIG["password"]
+	if len(pass) < 1 {
+		authType = "oauth"
+		pass = CONFIG["oauth_token"]
+	}
+
 	var err error
-	HIPCHAT_CLIENT, err = hipchat.NewClient(user, CONFIG["password"], "bot")
+	HIPCHAT_CLIENT, err = hipchat.NewClient(user, pass, "bot", authType)
 	if err != nil {
 		fail(fmt.Sprintf("Client error: %s\n", err))
 	}
@@ -3023,11 +3061,18 @@ func parseConfig() {
 		}
 	}
 
+	if len(CONFIG["password"]) > 0 && len(CONFIG["oauth_token"]) > 0 {
+		fail("Please set *either* 'password' *or* 'oauth_token', not both.\n")
+	} else if len(CONFIG["password"]) < 1 && len(CONFIG["oauth_token"]) < 1 {
+		fail("You need to set either 'password' or 'oauth_token' in your config.\n")
+	}
+
 	jbotDebug(fmt.Sprintf("%q", CONFIG))
 }
 
 func periodics() {
         for _ = range time.Tick(PERIODICS * time.Second) {
+		HIPCHAT_CLIENT.Status("chat")
 		HIPCHAT_CLIENT.RequestUsers()
 		HIPCHAT_CLIENT.RequestRooms()
 	}
