@@ -9,13 +9,19 @@
  * You should be able to run the bot by populating a
  * configuration file with suitable values.  The
  * following configuration values are required:
- *   password = the HipChat password of the bot user
+ *
+ * For HipChat:
+ *   hcPassword    = the HipChat password of the bot user
  *     OR
- *   oauth_token = the HipChat Oauth token for the bot user
- *   hcName   = the HipChat company prefix, e.g. <foo>.hipchatcom
- *   jabberID = the HipChat / JabberID of the bot user
- *   fullName = how the bot presents itself
- *   mentionName = to which name the bot responds to
+ *   hcOauthToken  = the HipChat Oauth token for the bot user
+ *   hcService     = the HipChat company prefix, e.g. <foo>.hipchat.com
+ *   hcJabberID    = the HipChat / JabberID of the bot user
+ *   fullName      = how the bot presents itself
+ *   mentionName   = to which name the bot responds to
+ *
+ * For Slack:
+ *   slackService  = the Slack service name, e.g. <foo>.slack.com
+ *   slackToken    = the authentication token for your bot
  *
  * This bot has a bunch of features that are company
  * internal; those features have been removed from
@@ -63,10 +69,11 @@ import (
 
 import (
 	"github.com/daneharrigan/hipchat"
+	"github.com/nlopes/slack"
 )
 
 const DEFAULT_THROTTLE = 1800
-const PERIODICS = 1800
+const PERIODICS = 120
 
 const EXIT_FAILURE = 1
 const EXIT_SUCCESS = 0
@@ -75,28 +82,34 @@ const PROGNAME = "jbot"
 const VERSION = "3.0"
 
 var CONFIG = map[string]string{
-	"channelsFile":   "/var/tmp/jbot.channels",
-	"configFile":     "/etc/jbot.conf",
-	"debug":          "no",
-	"domain":         "conf.hipchat.com",
-	"domainPrefix":   "",
-	"fullName":       "",
-	"hcName":         "",
-	"jabberID":       "",
-	"mentionName":    "",
-	"oauthToken":     "",
-	"opsgenieApiKey": "",
-	"password":       "",
-	"user":           "",
+	"byUser":           "",
+	"byPassword":       "",
+	"channelsFile":     "/var/tmp/jbot.channels",
+	"configFile":       "/etc/jbot.conf",
+	"debug":            "no",
+	"fullName":         "",
+	"hcControlChannel": "",
+	"hcJabberID":       "",
+	"hcOauthToken":     "",
+	"hcPassword":       "",
+	"hcService":        "",
+	"mentionName":      "",
+	"opsgenieApiKey":   "",
+	"slackService":     "",
+	"slackToken":       "",
 }
 
 var HIPCHAT_CLIENT *hipchat.Client
+var HIPCHAT_ROOMS = map[string]*hipchat.Room{}
+var HIPCHAT_ROSTER = map[string]*hipchat.User{}
+
+var SLACK_CLIENT *slack.Client
+var SLACK_RTM *slack.RTM
+var SLACK_ROSTER = map[string]*slack.User{}
 
 var CHANNELS = map[string]*Channel{}
 var CURSES = map[string]int{}
 var COMMANDS = map[string]*Command{}
-var ROOMS = map[string]*hipchat.Room{}
-var ROSTER = map[string]*hipchat.User{}
 
 var TOGGLES = map[string]bool{
 	"chatter":     true,
@@ -156,13 +169,15 @@ var COOKIES []*http.Cookie
 var VERBOSITY int
 
 type Channel struct {
-	Inviter   string
-	Jid       string
-	Name      string
-	Toggles   map[string]bool
-	Throttles map[string]time.Time
-	Users     map[hipchat.User]UserInfo
-	Settings  map[string]string
+	Inviter      string
+	Id           string
+	Name         string
+	Toggles      map[string]bool
+	Throttles    map[string]time.Time
+	Type         string
+	HipChatUsers map[hipchat.User]UserInfo
+	SlackUsers   map[string]UserInfo
+	Settings     map[string]string
 }
 
 type CommandFunc func(Recipient, string, string) string
@@ -176,25 +191,31 @@ type Command struct {
 }
 
 type UserInfo struct {
-	Seen   string
 	Count  int
 	Curses int
+	Id     string
+	Seen   string
 	Praise int
 }
 
 type ElizaResponse struct {
-	Re	  *regexp.Regexp
+	Re        *regexp.Regexp
 	Responses []string
 }
 
 /*
- * Jid         = 12345_98765@conf.hipchat.com
+ * ChatType    = hipchat|slack
+ * Id          = 12345_98765@conf.hipchat.com | C62HJV9F0
  * MentionName = JohnDoe
  * Name        = John Doe
- * ReplyTo     = 98765
+ * ReplyTo     = 98765 | U3GNF8QGJ
+ *
+ * To handle both HipChat and Slack, we overload the
+ * fields a bit: for Slack, "ReplyTo" is the channel.
  */
 type Recipient struct {
-	Jid         string
+	ChatType    string
+	Id          string
 	MentionName string
 	Name        string
 	ReplyTo     string
@@ -443,19 +464,32 @@ func cmdCurses(r Recipient, chName, args string) (result string) {
 	} else {
 		allUsers := map[string]int{}
 		wanted := strings.Split(args, " ")[0]
+		var curseCount int
 		for ch := range CHANNELS {
-			for u, info := range CHANNELS[ch].Users {
-				if wanted == "*" {
-					allUsers[u.MentionName] = info.Curses
-				} else if u.MentionName == wanted {
-					if info.Curses > 0 {
-						result = fmt.Sprintf("%d", info.Curses)
-					} else {
-						result = fmt.Sprintf("Looks like %s has been behaving so far.", wanted)
+			if r.ChatType == "hipchat" {
+				for u, info := range CHANNELS[ch].HipChatUsers {
+					if wanted == "*" {
+						allUsers[u.MentionName] = info.Curses
+					} else if u.MentionName == wanted {
+						curseCount = info.Curses
+						break
 					}
-					break
 				}
+			} else if r.ChatType == "slack" {
+				for u, info := range CHANNELS[ch].SlackUsers {
+					if wanted == "*" {
+						allUsers[u] = info.Curses
+					} else if u == wanted {
+						curseCount = info.Curses
+						break
+					}
+				}
+
 			}
+		}
+
+		if curseCount > 0 {
+			result = fmt.Sprintf("%d", curseCount)
 		}
 
 		if wanted == "*" {
@@ -679,21 +713,27 @@ func cmdInfo(r Recipient, chName, args string) (result string) {
 		args = strings.ToLower(args)
 	}
 
-	if ch, found := CHANNELS[args]; found {
-		result = fmt.Sprintf("I was invited into #%s by %s.\n", args, ch.Inviter)
-		result += fmt.Sprintf("These are the users I've seen in #%s:\n", args)
+	if ch, found := getChannel(r.ChatType, args); found {
+		result = fmt.Sprintf("I was invited into #%s by %s.\n", ch.Name, ch.Inviter)
+		result += fmt.Sprintf("These are the users I've seen in #%s:\n", ch.Name)
 
 		var names []string
 
-		for u := range ch.Users {
-			names = append(names, u.MentionName)
+		if r.ChatType == "hipchat" {
+			for u := range ch.HipChatUsers {
+				names = append(names, u.MentionName)
+			}
+		} else if r.ChatType == "slack" {
+			for u := range ch.SlackUsers {
+				names = append(names, u)
+			}
 		}
 		sort.Strings(names)
 		result += strings.Join(names, ", ")
 
 		stfu := cmdStfu(r, chName, "")
 		if len(stfu) > 0 {
-			result += fmt.Sprintf("\nTop 10 channel chatterers for #%s:\n", args)
+			result += fmt.Sprintf("\nTop 10 channel chatterers for #%s:\n", ch.Name)
 			result += fmt.Sprintf("%s", stfu)
 		}
 
@@ -772,6 +812,7 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 	}
 
 	if _, found := jiraJson["fields"]; !found {
+		fmt.Fprintf(os.Stderr, "+++ jira fail for %s: %v\n", ticket, jiraJson)
 		result = fmt.Sprintf("No data found for ticket %s", ticket)
 		return
 	}
@@ -803,7 +844,12 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 }
 
 func cmdLog(r Recipient, chName, args string) (result string) {
-	room := r.ReplyTo
+	var room string
+	if r.ChatType == "hipchat" {
+		room = r.ReplyTo
+	} else if r.ChatType == "slack" {
+		room = chName
+	}
 	if len(args) > 1 {
 		room = args
 	}
@@ -830,7 +876,7 @@ func cmdMonkeyStab(r Recipient, chName, args string) (result string) {
 func cmdOncall(r Recipient, chName, args string) (result string) {
 	oncall := args
 	if len(strings.Fields(oncall)) < 1 {
-		if ch, found := CHANNELS[r.ReplyTo]; found {
+		if ch, found := getChannel(r.ChatType, r.ReplyTo); found {
 			oncall = r.ReplyTo
 			if v, found := ch.Settings["oncall"]; found {
 				oncall = v
@@ -861,9 +907,9 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 	}
 
 	/* XXX: This will leak your API key into logs.
-	* OpsGenie API for read operations appears to require
-	* a GET operation, so there isn't much we can do
-	* about that. */
+	 * OpsGenie API for read operations appears to require
+	 * a GET operation, so there isn't much we can do
+	 * about that. */
 	theUrl := fmt.Sprintf("https://api.opsgenie.com/v1/json/schedule/timeline?apiKey=%s&name=%s_schedule", key, url.QueryEscape(args))
 	data := getURLContents(theUrl, false)
 
@@ -1064,9 +1110,17 @@ func cmdPraise(r Recipient, chName, args string) (result string) {
 
 	if len(args) < 1 {
 		heroes := make(map[int][]string)
-		for u := range ch.Users {
-			if ch.Users[u].Praise > 0 {
-				heroes[ch.Users[u].Praise] = append(heroes[ch.Users[u].Praise], u.MentionName)
+		if r.ChatType == "hipchat" {
+			for u := range ch.HipChatUsers {
+				if ch.HipChatUsers[u].Praise > 0 {
+					heroes[ch.HipChatUsers[u].Praise] = append(heroes[ch.HipChatUsers[u].Praise], u.MentionName)
+				}
+			}
+		} else if r.ChatType == "slack" {
+			for u := range ch.SlackUsers {
+				if ch.SlackUsers[u].Praise > 0 {
+					heroes[ch.SlackUsers[u].Praise] = append(heroes[ch.SlackUsers[u].Praise], u)
+				}
 			}
 		}
 
@@ -1090,22 +1144,25 @@ func cmdPraise(r Recipient, chName, args string) (result string) {
 	} else {
 		if strings.EqualFold(args, "me") ||
 			strings.EqualFold(args, "myself") ||
-			strings.EqualFold(args,	r.MentionName) {
+			strings.EqualFold(args, r.MentionName) {
 			result = cmdInsult(r, chName, "me")
 			return
 		}
 
-		for _, u := range ROSTER {
-			uid := strings.SplitN(strings.Split(u.Id, "@")[0], "_", 2)[1]
-			email := strings.Split(u.Email, "@")[0]
-			if strings.EqualFold(u.Name, args) ||
-				strings.EqualFold(email, args) ||
-				strings.EqualFold(u.MentionName, args) ||
-				strings.EqualFold(uid, args) {
-				uInfo := ch.Users[*u]
-				uInfo.Praise++
-				ch.Users[*u] = uInfo
+		if r.ChatType == "hipchat" {
+			for _, u := range HIPCHAT_ROSTER {
+				uid := strings.SplitN(strings.Split(u.Id, "@")[0], "_", 2)[1]
+				email := strings.Split(u.Email, "@")[0]
+				if strings.EqualFold(u.Name, args) ||
+					strings.EqualFold(email, args) ||
+					strings.EqualFold(u.MentionName, args) ||
+					strings.EqualFold(uid, args) {
+					uInfo := ch.HipChatUsers[*u]
+					uInfo.Praise++
+					ch.HipChatUsers[*u] = uInfo
+				}
 			}
+		} else if r.ChatType == "slack" {
 		}
 
 		if strings.EqualFold(args, CONFIG["mentionName"]) {
@@ -1225,33 +1282,66 @@ func cmdRoom(r Recipient, chName, args string) (result string) {
 	}
 
 	room := strings.TrimSpace(args)
-	candidates := []*hipchat.Room{}
+	lroom := strings.ToLower(room)
 
-	for _, aRoom := range ROOMS {
-		lc := strings.ToLower(aRoom.Name)
-		lroom := strings.ToLower(room)
+	type roomTopic struct {
+		Name  string
+		Topic string
+	}
 
-		if lc == lroom || aRoom.RoomId == room {
-			result = fmt.Sprintf("'%s' (%s)\n", aRoom.Name, aRoom.Privacy)
-			result += fmt.Sprintf("Topic: %s\n", aRoom.Topic)
+	var candidates []*roomTopic
 
-			owner := strings.Split(aRoom.Owner, "@")[0]
-			if u, found := ROSTER[owner]; found {
-				result += fmt.Sprintf("Owner: %s\n", u.MentionName)
+	if r.ChatType == "hipchat" {
+		for _, aRoom := range HIPCHAT_ROOMS {
+			lc := strings.ToLower(aRoom.Name)
+
+			if lc == lroom || aRoom.RoomId == room {
+				result = fmt.Sprintf("'%s' (%s)\n", aRoom.Name, aRoom.Privacy)
+				result += fmt.Sprintf("Topic: %s\n", aRoom.Topic)
+
+				owner := strings.Split(aRoom.Owner, "@")[0]
+				if u, found := HIPCHAT_ROSTER[owner]; found {
+					result += fmt.Sprintf("Owner: %s\n", u.MentionName)
+				}
+
+				if aRoom.LastActive != "" {
+					result += fmt.Sprintf("Last Active: %s\n", aRoom.LastActive)
+				}
+
+				if aRoom.NumParticipants != "0" {
+					result += fmt.Sprintf("Hip Chatters: %s\n", aRoom.NumParticipants)
+				}
+				result += fmt.Sprintf("https://%s.hipchat.com/history/room/%s\n", CONFIG["hcService"], aRoom.RoomId)
+				return
+			} else {
+				if strings.Contains(lc, lroom) {
+					candidates = append(candidates, &roomTopic{ aRoom.Name, aRoom.Topic})
+				}
 			}
-
-			if aRoom.LastActive != "" {
-				result += fmt.Sprintf("Last Active: %s\n", aRoom.LastActive)
-			}
-
-			if aRoom.NumParticipants != "0" {
-				result += fmt.Sprintf("Hip Chatters: %s\n", aRoom.NumParticipants)
-			}
-			result += fmt.Sprintf("https://%s.hipchat.com/history/room/%s\n", CONFIG["hcName"], aRoom.RoomId)
-			return
-		} else {
-			if strings.Contains(lc, lroom) {
-				candidates = append(candidates, aRoom)
+		}
+	} else if r.ChatType == "slack" {
+		for _, ch := range SLACK_RTM.GetInfo().Channels {
+			lc := strings.ToLower(ch.Name)
+			if lc == lroom {
+				result = fmt.Sprintf("'%s'\n", ch.Name)
+				if len(ch.Topic.Value) > 0 {
+					result += fmt.Sprintf("Topic: %s\n", ch.Topic.Value)
+				}
+				if len(ch.Purpose.Value) > 0 {
+					result += fmt.Sprintf("Purpose: %s\n", ch.Purpose.Value)
+				}
+				creator, err := SLACK_CLIENT.GetUserInfo(ch.Creator)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Unable to find user information for '%s'.\n", ch.Creator)
+					result += fmt.Sprintf("Creator: Unknown\n")
+				} else {
+					result += fmt.Sprintf("Creator: %s\n", creator.Name)
+				}
+				result += fmt.Sprintf("# of members: %d\n", len(ch.Members))
+				result += fmt.Sprintf("https://%s/messages/%s/\n", CONFIG["slackService"], lroom)
+				return
+			} else if strings.Contains(lc, lroom) {
+				candidates = append(candidates, &roomTopic{ ch.Name, ch.Topic.Value})
 			}
 		}
 	}
@@ -1273,7 +1363,9 @@ func cmdRoom(r Recipient, chName, args string) (result string) {
 	}
 
 	if len(result) < 1 {
-		HIPCHAT_CLIENT.RequestRooms()
+		if r.ChatType == "hipchat" {
+			HIPCHAT_CLIENT.RequestRooms()
+		}
 		result = "No such room: " + room
 	}
 
@@ -1285,11 +1377,11 @@ func cmdSeen(r Recipient, chName, args string) (result string) {
 	user := wanted[0]
 	verbose(fmt.Sprintf("Looking in %s", r.ReplyTo), 4)
 
-	ch, found := CHANNELS[r.ReplyTo]
+	ch, found := getChannel(r.ChatType, r.ReplyTo)
 
 	if len(wanted) > 1 {
 		verbose(fmt.Sprintf("Looking for %s in %s'...", user, wanted[1]), 4)
-		ch, found = CHANNELS[wanted[1]]
+		ch, found = getChannel(r.ChatType, wanted[1])
 	}
 
 	if strings.EqualFold(args, CONFIG["mentionName"]) {
@@ -1318,7 +1410,7 @@ func cmdSeen(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	for u, info := range ch.Users {
+	for u, info := range ch.HipChatUsers {
 		if u.MentionName == user {
 			result = info.Seen
 		}
@@ -1384,42 +1476,56 @@ func cmdSpeb(r Recipient, chName, args string) (result string) {
 }
 
 func cmdStfu(r Recipient, chName, args string) (result string) {
-	where := r.ReplyTo
+	var ch *Channel
+	var found bool
 
-	if ch, found := CHANNELS[where]; found {
-		chatter := make(map[int][]string)
-		for u := range ch.Users {
+	if ch, found = CHANNELS[chName]; !found {
+		result = "This command only works in a channel."
+		return
+	}
+
+	chatter := make(map[int][]string)
+
+	if r.ChatType == "hipchat" {
+		for u := range ch.HipChatUsers {
 			if (len(args) > 0) && (u.MentionName != args) {
 				continue
 			}
-			chatter[ch.Users[u].Count] = append(chatter[ch.Users[u].Count], u.MentionName)
+			chatter[ch.HipChatUsers[u].Count] = append(chatter[ch.HipChatUsers[u].Count], u.MentionName)
 		}
-
-		if (len(args) > 0) && (len(chatter) < 1) {
-			result = fmt.Sprintf("%s hasn't said anything in %s.",
-				args, where)
-			return
-		}
-
-		var stfu []int
-		for count := range chatter {
-			stfu = append(stfu, count)
-		}
-		sort.Sort(sort.Reverse(sort.IntSlice(stfu)))
-
-		var chatterers []string
-		for _, n := range stfu {
-			for _, t := range chatter[n] {
-				chatterers = append(chatterers, fmt.Sprintf("%s (%d)", t, n))
+	} else if r.ChatType == "slack" {
+		for u := range ch.SlackUsers {
+			if (len(args) > 0) && (u != args) {
+				continue
 			}
+			chatter[ch.SlackUsers[u].Count] = append(chatter[ch.SlackUsers[u].Count], u)
 		}
-
-		i := len(chatterers)
-		if i > 10 {
-			i = 10
-		}
-		result += strings.Join(chatterers[0:i], ", ")
 	}
+
+	if (len(args) > 0) && (len(chatter) < 1) {
+		result = fmt.Sprintf("%s hasn't said anything in %s.",
+			args, chName)
+		return
+	}
+
+	var stfu []int
+	for count := range chatter {
+		stfu = append(stfu, count)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(stfu)))
+
+	var chatterers []string
+	for _, n := range stfu {
+		for _, t := range chatter[n] {
+			chatterers = append(chatterers, fmt.Sprintf("%s (%d)", t, n))
+		}
+	}
+
+	i := len(chatterers)
+	if i > 10 {
+		i = 10
+	}
+	result += strings.Join(chatterers[0:i], ", ")
 	return
 }
 
@@ -1574,7 +1680,7 @@ func cmdTld(r Recipient, chName, args string) (result string) {
 		result = fmt.Sprintf("No such TLD: '%s'", domain)
 	} else {
 		if len(info["organisation"]) > 0 {
-			result =  fmt.Sprintf("Organization: %s\n", info["organisation"])
+			result = fmt.Sprintf("Organization: %s\n", info["organisation"])
 		}
 		if len(info["e-mail"]) > 0 {
 			result += fmt.Sprintf("Contact     : %s\n", info["e-mail"])
@@ -1654,29 +1760,34 @@ func cmdUd(r Recipient, chName, args string) (result string) {
 
 	theUrl := COMMANDS["ud"].How
 	if len(args) > 0 {
-		theUrl += fmt.Sprintf("define.php?term=%s", url.QueryEscape(args))
+		theUrl += fmt.Sprintf("define?term=%s", url.QueryEscape(args))
 	} else {
-		theUrl += "random.php"
+		theUrl += "random"
 	}
 
 	data := getURLContents(theUrl, false)
 
-	ud_re := regexp.MustCompile(`(?i)<a class="word" .*>(.*)</a></div><div class="meaning">(.*)</div><div class="example">(.*)</div><div class="contributor"`)
-
-	for _, line := range strings.Split(string(data), "\n") {
-		if m := ud_re.FindStringSubmatch(line); len(m) > 0 {
-			result = fmt.Sprintf("%s\n%s\nExample: %s",
-						dehtmlify(m[1]),
-						dehtmlify(m[2]),
-						dehtmlify(m[3]))
-				break
-			}
-		}
+	var jsonData map[string]interface{}
+	err := json.Unmarshal(data, &jsonData)
+	if err != nil {
+		result = fmt.Sprintf("Unable to unmarshal urban dictionary json: %s\n", err)
+		return
 	}
 
-	if len(result) < 1 {
+	rtype := jsonData["result_type"]
+	if rtype == "no_results" {
 		result = fmt.Sprintf("Sorry, Urban Dictionary is useless when it comes to %s.", args)
+	} else if rtype == "exact" || len(args) == 0 {
+		entry := jsonData["list"].([]interface{})[0]
+
+		result = fmt.Sprintf("%s\n%s\nExample: %s",
+				entry.(map[string]interface{})["word"],
+				entry.(map[string]interface{})["definition"],
+				entry.(map[string]interface{})["example"])
+	} else {
+		result = fmt.Sprintf("Unexpected result type: %s", rtype)
 	}
+
 	return
 }
 
@@ -1754,7 +1865,7 @@ func cmdUser(r Recipient, chName, args string) (result string) {
 	user := strings.TrimSpace(args)
 	candidates := []*hipchat.User{}
 
-	for _, u := range ROSTER {
+	for _, u := range HIPCHAT_ROSTER {
 		uid := strings.SplitN(strings.Split(u.Id, "@")[0], "_", 2)[1]
 		email := strings.Split(u.Email, "@")[0]
 		if strings.EqualFold(u.Name, user) ||
@@ -1885,6 +1996,8 @@ func cmdWeather(r Recipient, chName, args string) (result string) {
 		return
 	}
 
+	jbotDebug(jsonData)
+
 	jsonOutput := jsonData["query"]
 	jsonResults := jsonOutput.(map[string]interface{})["results"]
 	jsonCount := jsonOutput.(map[string]interface{})["count"].(float64)
@@ -1942,6 +2055,212 @@ func cmdWhocyberedme(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdWhois(r Recipient, chName, args string) (result string) {
+	if len(strings.Fields(args)) != 1 {
+		result = "Usage: " + COMMANDS["whois"].Usage
+		return
+	}
+
+	hostinfo := cmdHost(r, chName, args)
+	if strings.Contains(hostinfo, "not found:") {
+		result = hostinfo
+		return
+	}
+
+	out, _ := runCommand(fmt.Sprintf("whois %s", args))
+	data := string(out)
+
+
+	/* whois formatting is a mess; different whois servers return
+	 * all sorts of different information in all sorts of different
+	 * formats. We'll try to catch some common ones here. :-/ */
+
+	var format string
+	found := false
+
+	formatGuesses := map[*regexp.Regexp]string {
+		regexp.MustCompile("(?i)Registry Domain ID:")               : "common",
+		regexp.MustCompile("(?i)%% This is the AFNIC Whois server."): "afnic",
+		regexp.MustCompile("(?i)% Copyright.* by DENIC")            : "denic",
+		regexp.MustCompile("(?i)The EDUCAUSE Whois database")       : "educause",
+		regexp.MustCompile("(?i)for .uk domain names")              : "uk",
+	}
+
+	for p, f := range formatGuesses {
+		if p.MatchString(data) {
+			format = f
+			found = true
+		}
+	}
+
+	info := map[string]string{}
+	var wanted []string
+	var field string
+	next := false
+
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.Contains(l, "No match for domain") {
+			result = l
+			return
+		}
+
+		if strings.HasPrefix(l, "%") || strings.HasPrefix(l, "#") {
+			continue
+		}
+
+		if found {
+			keyval := strings.SplitN(l, ":", 2)
+			k := strings.TrimSpace(keyval[0])
+			if len(keyval) > 1 {
+				v := strings.TrimSpace(keyval[1])
+				if _, exists := info[k]; exists {
+					info[k] += ", " + v
+				} else {
+					info[k] = v
+				}
+			}
+
+			if format == "common" {
+				wanted = []string{
+					"Registrar",
+					"Registrar URL",
+					"Updated Date",
+					"Creation Date",
+					"Registry Expiry Date",
+					"Registrant Name",
+					"Registrant Organization",
+					"Registrant Country",
+					"Registrant Email",
+					"Name Server",
+					"DNSSEC",
+				}
+			} else if format == "afnic" {
+				if strings.HasPrefix(l, "nic-hdl:") {
+					break
+				}
+				wanted = []string{
+					"registrar",
+					"country",
+					"Expiry Date",
+					"created",
+					"last-update",
+					"nserver",
+					"e-mail",
+				}
+			} else if format == "denic" {
+				wanted = []string{
+					"Nserver",
+					"Changed",
+					"Organisation",
+					"CountryCode",
+					"Email",
+				}
+				if strings.HasPrefix(l, "[Zone-C]") {
+					break
+				}
+			} else if format == "educause" {
+				wanted = []string{
+					"Registrant",
+					"Email",
+					"Name Servers",
+					"Domain record activated",
+					"Domain record last updated",
+					"Domain expires",
+				}
+				if strings.HasPrefix(l, "Registrant:") {
+					field = "Registrant"
+					next = true
+					continue
+				}
+
+				if strings.Contains(l, "@") {
+					info["Email"] = strings.TrimSpace(l)
+					continue
+				}
+
+				if strings.HasPrefix(l, "Name Servers") {
+					field = "Name Servers"
+					next = true
+					continue
+				}
+
+				if next {
+					if field == "Name Servers" {
+						if s, exists := info[field]; exists {
+							if len(s) > 1 {
+								info[field] += "\n" + strings.TrimSpace(l)
+							} else {
+								info[field] = strings.TrimSpace(l)
+							}
+						} else {
+							info[field] = strings.TrimSpace(l)
+						}
+					} else {
+						info[field] = strings.TrimSpace(l)
+						next = false
+					}
+					if len(l) < 1 {
+						next = false
+					}
+				}
+			} else if format == "uk" {
+				wanted = []string{
+					"Registrant",
+					"Regsitrar",
+					"Registered on",
+					"Expiry date",
+					"Last updated",
+					"Name servers",
+				}
+				if strings.Contains(l, "Registrant:") {
+					field = "Registrant"
+					next = true
+					continue
+				}
+				if strings.Contains(l, "Registrar:") {
+					field = "Registrar"
+					next = true
+					continue
+				}
+				if strings.Contains(l, "Name servers:") {
+					field = "Name servers"
+					next = true
+					continue
+				}
+
+				if next {
+					if strings.Contains(l, "WHOIS lookup made") {
+						break
+					}
+					if field == "Name servers" {
+						if s, exists := info[field]; exists {
+							if len(s) > 1 {
+								info[field] += "\n" + strings.TrimSpace(l)
+							} else {
+								info[field] = strings.TrimSpace(l)
+							}
+						} else {
+							info[field] = strings.TrimSpace(l)
+						}
+					} else {
+						info[field] = strings.TrimSpace(l)
+						next = false
+					}
+				}
+			}
+		}
+	}
+
+	if len(info) > 0 {
+		for _, f := range wanted {
+			if v, exists := info[f]; exists {
+				result += fmt.Sprintf("%s: %s\n", f, v)
+			}
+		}
+	}
+	return
+}
+
 func cmdWtf(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["wtf"].Usage
@@ -1989,7 +2308,12 @@ func catchPanic() {
 		fmt.Fprintf(os.Stderr, "Panic!\n%s\n", r)
 		debug.PrintStack()
 		fmt.Fprintf(os.Stderr, "Let's try this again.\n")
-		doTheHipChat()
+		if len(CONFIG["hcService"]) > 0 {
+			doTheHipChat()
+		}
+		if len(CONFIG["slackName"]) > 0 {
+			doTheSlackChat()
+		}
 	}
 }
 
@@ -2403,15 +2727,15 @@ func chatterMontyPython(msg string) (result string) {
 
 	result = ""
 	patterns := map[*regexp.Regexp]string{
-		regexp.MustCompile("(?i)(a|the|which|of) swallow"):                                      "An African or European swallow?",
+		regexp.MustCompile("(?i)(a|the|which|of) swallow"):                                          "An African or European swallow?",
 		regexp.MustCompile("(?i)(excalibur|lady of the lake|magical lake|merlin|avalon|\bdruid\b)"): "Strange women lying in ponds distributing swords is no basis for a system of government!",
-		regexp.MustCompile("(?i)(Judean People's Front|People's Front of Judea)"):               "Splitters.",
-		regexp.MustCompile("(?i)really very funny"):                                             "I don't think there's a punch-line scheduled, is there?",
-		regexp.MustCompile("(?i)inquisition"):                                                   "Oehpr Fpuarvre rkcrpgf gur Fcnavfu Vadhvfvgvba.",
-		regexp.MustCompile("(?i)say no more"):                                                   "Nudge, nudge, wink, wink. Know what I mean?",
-		regexp.MustCompile("(?i)Romanes eunt domus"):                                            "'People called Romanes they go the house?'",
-		regexp.MustCompile("(?i)(correct|proper) latin"):                                        "Romani ite domum.",
-		regexp.MustCompile("(?i)hungarian"):                                                     "My hovercraft if full of eels.",
+		regexp.MustCompile("(?i)(Judean People's Front|People's Front of Judea)"):                   "Splitters.",
+		regexp.MustCompile("(?i)really very funny"):                                                 "I don't think there's a punch-line scheduled, is there?",
+		regexp.MustCompile("(?i)inquisition"):                                                       "Oehpr Fpuarvre rkcrpgf gur Fcnavfu Vadhvfvgvba.",
+		regexp.MustCompile("(?i)say no more"):                                                       "Nudge, nudge, wink, wink. Know what I mean?",
+		regexp.MustCompile("(?i)Romanes eunt domus"):                                                "'People called Romanes they go the house?'",
+		regexp.MustCompile("(?i)(correct|proper) latin"):                                            "Romani ite domum.",
+		regexp.MustCompile("(?i)hungarian"):                                                         "My hovercraft if full of eels.",
 	}
 
 	anypattern := regexp.MustCompile("(?i)(camelot|cleese|monty|snake|serpent)")
@@ -2456,7 +2780,6 @@ func chatterSeinfeld(msg string) (result string) {
 		regexp.MustCompile("(?i)mystery"):                 "You're a mystery wrapped in a twinky!",
 		regexp.MustCompile("(?i)marine biologist"):        "You know I always wanted to pretend that I was an architect!",
 		regexp.MustCompile("(?i)sailor"):                  "If I was a woman I'd be down on the dock waiting for the fleet to come in.",
-		regexp.MustCompile("(?i)dentist"):                 "Okay, so you were violated by two people while you were under the gas. So what? You're single.",
 		regexp.MustCompile("(?i)sophisticated"):           "Well, there's nothing more sophisticated than diddling the maid and then chewing some gum.",
 		regexp.MustCompile("(?i)sleep with me"):           "I'm too tired to even vomit at the thought.",
 		regexp.MustCompile("(?i)what do you want to eat"): "Feels like an Arby's night.",
@@ -2669,7 +2992,7 @@ func createCommands() {
 		nil}
 	COMMANDS["ud"] = &Command{cmdUd,
 		"look up a term using the Urban Dictionary (NSFW)",
-		"https://www.urbandictionary.com/",
+		"https://api.urbandictionary.com/v0/",
 		"!ud [<term>]",
 		nil}
 	COMMANDS["unset"] = &Command{cmdUnset,
@@ -2697,6 +3020,11 @@ func createCommands() {
 		"show weather information",
 		URLS["yql"],
 		"!weather <location>",
+		nil}
+	COMMANDS["whois"] = &Command{cmdWhois,
+		"show whois information",
+		"whois(1)",
+		"!whois <domain>",
 		nil}
 	COMMANDS["wtf"] = &Command{cmdWtf,
 		"decrypt acronyms",
@@ -2731,17 +3059,13 @@ func dehtmlify(in string) (out string) {
 }
 
 func doTheHipChat() {
-	user := strings.Split(CONFIG["jabberID"], "@")[0]
-	domain := strings.Split(CONFIG["jabberID"], "@")[1]
-	CONFIG["user"] = user
-	CONFIG["domain"] = domain
-	CONFIG["domainPrefix"] = strings.Split(user, "_")[0]
+	user := strings.Split(CONFIG["hcJabberID"], "@")[0]
 
 	authType := "plain"
-	pass := CONFIG["password"]
+	pass := CONFIG["hcPassword"]
 	if len(pass) < 1 {
 		authType = "oauth"
-		pass = CONFIG["oauth_token"]
+		pass = CONFIG["hcOauthToken"]
 	}
 
 	var err error
@@ -2756,7 +3080,15 @@ func doTheHipChat() {
 
 	for _, ch := range CHANNELS {
 		verbose(fmt.Sprintf("Joining #%s...", ch.Name), 1)
-		HIPCHAT_CLIENT.Join(ch.Jid, CONFIG["fullName"])
+		HIPCHAT_CLIENT.Join(ch.Id, CONFIG["fullName"])
+
+		/* Our state file might not contain
+		 * the changed structures, so explicitly
+		 * fix things here. */
+		if len(ch.HipChatUsers) < 1 {
+			ch.HipChatUsers = make(map[hipchat.User]UserInfo, 0)
+		}
+
 		for t, v := range TOGGLES {
 			if len(ch.Toggles) == 0 {
 				ch.Toggles = map[string]bool{}
@@ -2767,7 +3099,7 @@ func doTheHipChat() {
 		}
 	}
 
-	go periodics()
+	go hcPeriodics()
 	go HIPCHAT_CLIENT.KeepAlive()
 
 	go func() {
@@ -2776,15 +3108,48 @@ func doTheHipChat() {
 		for {
 			select {
 			case message := <-HIPCHAT_CLIENT.Messages():
-				processMessage(message)
+				processHipChatMessage(message)
 			case users := <-HIPCHAT_CLIENT.Users():
 				updateRoster(users)
 			case rooms := <-HIPCHAT_CLIENT.Rooms():
-				updateRooms(rooms)
+				updateHipChatRooms(rooms)
 			}
 		}
 	}()
-	select {}
+}
+
+func doTheSlackChat() {
+	SLACK_CLIENT = slack.New(CONFIG["slackToken"])
+	if CONFIG["debug"] == "yes" {
+		SLACK_CLIENT.SetDebug(true)
+	}
+	SLACK_RTM = SLACK_CLIENT.NewRTM()
+	go SLACK_RTM.ManageConnection()
+
+	go slackPeriodics()
+Loop:
+	for {
+		select {
+		case msg := <-SLACK_RTM.IncomingEvents:
+			switch ev := msg.Data.(type) {
+			case *slack.ChannelJoinedEvent:
+				processSlackChannelJoin(ev)
+
+			case *slack.InvalidAuthEvent:
+				fmt.Fprintf(os.Stderr, "Unable to authenticate.")
+				break Loop
+
+			case *slack.MessageEvent:
+				processSlackMessage(ev)
+
+			case *slack.RTMError:
+				fmt.Fprintf(os.Stderr, "Slack error: %s\n", ev.Error())
+
+			default:
+				jbotDebug(msg)
+			}
+		}
+	}
 }
 
 func fail(msg string) {
@@ -2851,23 +3216,55 @@ func getopts() {
 	}
 }
 
-func getRecipientFromMessage(mfrom string) (r Recipient) {
-	from := strings.Split(mfrom, "/")
-	r.Jid = from[0]
-	r.ReplyTo = strings.SplitN(strings.Split(r.Jid, "@")[0], "_", 2)[1]
-	r.Name = ""
-	r.MentionName = ""
+func getChannel(chatType, id string) (ch *Channel, ok bool) {
+	ok = false
+	var found bool
 
-	if len(from) > 1 {
-		r.Name = from[1]
+	if chatType == "slack" {
+		slackChannel, err := SLACK_CLIENT.GetChannelInfo(id)
+		if err != nil {
+			return
+		}
+		id = slackChannel.Name
 	}
 
-	if len(r.Name) > 1 {
-		for _, u := range ROSTER {
-			if u.Name == r.Name {
-				r.MentionName = u.MentionName
-				break
+	if ch, found = CHANNELS[id]; found {
+		ok = true
+	}
+	return
+}
+
+func getRecipientFromMessage(mfrom string, chatType string) (r Recipient) {
+	r.ChatType = chatType
+	if chatType == "hipchat" {
+		from := strings.Split(mfrom, "/")
+		r.Id = from[0]
+		r.ReplyTo = strings.SplitN(strings.Split(r.Id, "@")[0], "_", 2)[1]
+		r.Name = ""
+		r.MentionName = ""
+
+		if len(from) > 1 {
+			r.Name = from[1]
+		}
+
+		if len(r.Name) > 1 {
+			for _, u := range HIPCHAT_ROSTER {
+				if u.Name == r.Name {
+					r.MentionName = u.MentionName
+					break
+				}
 			}
+		}
+	} else if chatType == "slack" {
+		from := strings.Split(mfrom, "@")
+		r.Id = from[0]
+		r.ReplyTo = from[1]
+		user, err := SLACK_CLIENT.GetUserInfo(r.Id)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Unknown user: %s\n", mfrom)
+		} else {
+			r.Name = user.Profile.RealName
+			r.MentionName = user.Name
 		}
 	}
 
@@ -2894,7 +3291,7 @@ func getSortedKeys(hash map[string]int, rev bool) (sorted []string) {
 	seen := map[int]bool{}
 	for _, n := range vals {
 		for k, v := range hash {
-			if v == n  && !seen[n] {
+			if v == n && !seen[n] {
 				sorted = append(sorted, k)
 			}
 		}
@@ -2973,8 +3370,24 @@ func leave(r Recipient, channelFound bool, msg string, command bool) {
 	}
 
 	if channelFound {
-		HIPCHAT_CLIENT.Part(r.Jid, CONFIG["fullName"])
-		delete(CHANNELS, r.ReplyTo)
+		if r.ChatType == "hipchat" {
+			HIPCHAT_CLIENT.Part(r.Id, CONFIG["fullName"])
+			delete(CHANNELS, r.ReplyTo)
+		} else if r.ChatType == "slack" {
+			msg := "Unable to leave channel "
+			ch, found := getChannel(r.ChatType, r.ReplyTo)
+			if _, err := SLACK_RTM.LeaveChannel(r.ReplyTo); err != nil {
+				if found {
+					msg += fmt.Sprintf("'%s' (%s)", ch.Name, r.ReplyTo)
+				} else {
+					msg += r.ReplyTo
+				}
+				msg += fmt.Sprintf(": %s\n", err)
+				msg += "Please find an admin to kick me from your channel.\n"
+				msg += "Until then, maybe just '!toggle chatter' to off?\n"
+			}
+			reply(r, msg)
+		}
 	} else {
 		reply(r, "Try again from a channel I'm in.")
 	}
@@ -3061,20 +3474,53 @@ func parseConfig() {
 		}
 	}
 
-	if len(CONFIG["password"]) > 0 && len(CONFIG["oauth_token"]) > 0 {
-		fail("Please set *either* 'password' *or* 'oauth_token', not both.\n")
-	} else if len(CONFIG["password"]) < 1 && len(CONFIG["oauth_token"]) < 1 {
-		fail("You need to set either 'password' or 'oauth_token' in your config.\n")
+	if len(CONFIG["hcService"]) > 0 {
+		if len(CONFIG["hcPassword"]) > 0 && len(CONFIG["hcOauthToken"]) > 0 {
+			fail("Please set *either* 'password' *or* 'oauth_token', not both.\n")
+		} else if len(CONFIG["hcPassword"]) < 1 && len(CONFIG["hcOauthToken"]) < 1 {
+			fail("You need to set either 'password' or 'oauth_token' in your config.\n")
+		}
+
+		if len(CONFIG["hcControlChannel"]) > 0 {
+			var ch Channel
+
+			verbose(fmt.Sprintf("Setting up control channel '%s'...", CONFIG["hcControlChannel"]), 2)
+			r := getRecipientFromMessage(CONFIG["hcControlChannel"], "hipchat")
+
+			ch.Toggles = map[string]bool{}
+			ch.Throttles = map[string]time.Time{}
+			ch.Settings = map[string]string{}
+			ch.Type = "hipchat"
+			ch.Name = r.ReplyTo
+			ch.Id = r.Id
+			ch.HipChatUsers = make(map[hipchat.User]UserInfo, 0)
+			for t, v := range TOGGLES {
+				ch.Toggles[t] = v
+			}
+			jbotDebug(fmt.Sprintf("%q", ch))
+			CHANNELS[ch.Name] = &ch
+		}
+	}
+
+	if len(CONFIG["slackService"]) > 0 {
+		if len(CONFIG["mentionName"]) < 1 || len(CONFIG["slackToken"]) < 0 {
+			fail("Please set 'mentionName' and 'slackToken'.")
+		}
 	}
 
 	jbotDebug(fmt.Sprintf("%q", CONFIG))
 }
 
-func periodics() {
-        for _ = range time.Tick(PERIODICS * time.Second) {
+func hcPeriodics() {
+	for _ = range time.Tick(PERIODICS * time.Second) {
 		HIPCHAT_CLIENT.Status("chat")
 		HIPCHAT_CLIENT.RequestUsers()
 		HIPCHAT_CLIENT.RequestRooms()
+
+		if len(CONFIG["hcControlChannel"]) > 0 {
+			r := getRecipientFromMessage(CONFIG["hcControlChannel"], "hipchat")
+			HIPCHAT_CLIENT.Say(r.Id, CONFIG["fullName"], "ping")
+		}
 	}
 }
 
@@ -3084,7 +3530,7 @@ func printVersion() {
 
 func processChatter(r Recipient, msg string, forUs bool) {
 	var chitchat string
-	ch, found := CHANNELS[r.ReplyTo]
+	ch, found := getChannel(r.ChatType, r.ReplyTo)
 
 	jbotDebug(fmt.Sprintf("%s - %v", msg, forUs))
 	/* If we received a message but can't find the
@@ -3167,7 +3613,18 @@ func processChatter(r Recipient, msg string, forUs bool) {
 
 func processCommands(r Recipient, invocation, line string) {
 	defer catchPanic()
-	verbose(fmt.Sprintf("#%s: '%s'", r.ReplyTo, line), 2)
+
+	who := r.ReplyTo
+
+	ch, channelFound := getChannel(r.ChatType, r.ReplyTo)
+	if channelFound {
+		who = ch.Name
+	} else if r.ChatType == "slack" {
+		if user, err := SLACK_CLIENT.GetUserInfo(r.Id); err == nil {
+			who = user.Name
+		}
+	}
+	verbose(fmt.Sprintf("#%s: '%s'", who, line), 2)
 
 	args := strings.Fields(line)
 	if len(args) < 1 {
@@ -3185,7 +3642,6 @@ func processCommands(r Recipient, invocation, line string) {
 	}
 
 	jbotDebug(fmt.Sprintf("|%s| |%s|", cmd, args))
-	_, channelFound := CHANNELS[r.ReplyTo]
 
 	if len(cmd) < 1 {
 		replies := []string{
@@ -3234,7 +3690,11 @@ func processCommands(r Recipient, invocation, line string) {
 
 	if commandFound {
 		if COMMANDS[cmd].Call != nil {
-			response = COMMANDS[cmd].Call(r, r.ReplyTo, strings.Join(args, " "))
+			chName := r.ReplyTo
+			if ch, found := getChannel(r.ChatType, r.ReplyTo); found {
+				chName = ch.Name
+			}
+			response = COMMANDS[cmd].Call(r, chName, strings.Join(args, " "))
 		} else {
 			fmt.Fprintf(os.Stderr, "'nil' function for %s?\n", cmd)
 			return
@@ -3245,10 +3705,10 @@ func processCommands(r Recipient, invocation, line string) {
 	return
 }
 
-func processInvite(r Recipient, invite string) {
+func processHipChatInvite(r Recipient, invite string) {
 	from := strings.Split(invite, "'")[1]
-	fr := getRecipientFromMessage(from)
-	inviter := strings.Split(fr.Jid, "@")[0]
+	fr := getRecipientFromMessage(from, "hipchat")
+	inviter := strings.Split(fr.Id, "@")[0]
 	channelName := r.ReplyTo
 
 	var ch Channel
@@ -3256,25 +3716,26 @@ func processInvite(r Recipient, invite string) {
 	ch.Throttles = map[string]time.Time{}
 	ch.Settings = map[string]string{}
 	ch.Name = r.ReplyTo
-	ch.Jid = r.Jid
-	if _, found := ROSTER[inviter]; found {
-		ch.Inviter = ROSTER[inviter].MentionName
+	ch.Type = "hipchat"
+	ch.Id = r.Id
+	if _, found := HIPCHAT_ROSTER[inviter]; found {
+		ch.Inviter = HIPCHAT_ROSTER[inviter].MentionName
 	} else {
 		ch.Inviter = "Nobody"
 	}
-	ch.Users = make(map[hipchat.User]UserInfo, 0)
+	ch.HipChatUsers = make(map[hipchat.User]UserInfo, 0)
 
 	for t, v := range TOGGLES {
 		ch.Toggles[t] = v
 	}
 
-	verbose(fmt.Sprintf("I was invited into '%s' (%s) by '%s'.", channelName, r.Jid, from), 2)
+	verbose(fmt.Sprintf("I was invited into '%s' (%s) by '%s'.", channelName, r.Id, from), 2)
 	CHANNELS[channelName] = &ch
 	verbose(fmt.Sprintf("Joining #%s...", ch.Name), 1)
-	HIPCHAT_CLIENT.Join(r.Jid, CONFIG["fullName"])
+	HIPCHAT_CLIENT.Join(r.Id, CONFIG["fullName"])
 }
 
-func processMessage(message *hipchat.Message) {
+func processHipChatMessage(message *hipchat.Message) {
 	if len(message.Body) < 1 {
 		/* If a user initiates a 1:1 dialog
 		 * with the bot, the hipchat client will send a ''
@@ -3286,7 +3747,7 @@ func processMessage(message *hipchat.Message) {
 		return
 	}
 
-	r := getRecipientFromMessage(message.From)
+	r := getRecipientFromMessage(message.From, "hipchat")
 	if r.Name == CONFIG["fullName"] {
 		//verbose("Ignoring message from myself.", 5)
 		return
@@ -3295,7 +3756,7 @@ func processMessage(message *hipchat.Message) {
 	updateSeen(r, message.Body)
 
 	if strings.HasPrefix(message.Body, "<invite from") {
-		processInvite(r, message.Body)
+		processHipChatInvite(r, message.Body)
 		return
 	}
 
@@ -3304,14 +3765,100 @@ func processMessage(message *hipchat.Message) {
 		return
 	}
 
+	processMessage(r, message.Body)
+}
+
+func processMessage(r Recipient, msg string) {
+
 	command_re := regexp.MustCompile(fmt.Sprintf("^(?i)(!|[@/]%s [/!]?)", CONFIG["mentionName"]))
-	if command_re.MatchString(message.Body) {
-		matchEnd := command_re.FindStringIndex(message.Body)[1]
-		go processCommands(r, message.Body[0:matchEnd], message.Body[matchEnd:])
+	if command_re.MatchString(msg) {
+		matchEnd := command_re.FindStringIndex(msg)[1]
+		go processCommands(r, msg[0:matchEnd], msg[matchEnd:])
 	} else {
-		processChatter(r, message.Body, false)
+		processChatter(r, msg, false)
 	}
 }
+
+
+func processSlackChannelJoin(ev *slack.ChannelJoinedEvent) {
+	jbotDebug(fmt.Sprintf("Join: %v\n", ev))
+}
+
+func processSlackInvite(name string, msg *slack.MessageEvent) {
+	var ch Channel
+	ch.Toggles = map[string]bool{}
+	ch.Throttles = map[string]time.Time{}
+	ch.Settings = map[string]string{}
+	ch.Type = "slack"
+	ch.Id = msg.Channel
+	ch.SlackUsers = make(map[string]UserInfo, 0)
+	ch.Inviter = "Nobody"
+	ch.Name = name
+
+	if len(msg.Inviter) > 0 {
+		user, err := SLACK_CLIENT.GetUserInfo(msg.Inviter)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Unable to find user information for '%s'.\n", msg.Inviter)
+		} else {
+			ch.Inviter = user.Name
+		}
+	}
+
+	for t, v := range TOGGLES {
+		ch.Toggles[t] = v
+	}
+
+	verbose(fmt.Sprintf("I was invited into '%s' (%s) by '%s'.", ch.Name, ch.Id, ch.Inviter), 2)
+	CHANNELS[ch.Name] = &ch
+}
+
+
+func processSlackMessage(msg *slack.MessageEvent) {
+	jbotDebug(fmt.Sprintf("Message: %v\n", msg))
+	info := SLACK_RTM.GetInfo()
+
+	channel , err := SLACK_CLIENT.GetChannelInfo(msg.Channel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to find channel information for channel '%s'.\n", msg.Channel)
+	} else {
+		if _, found := CHANNELS[channel.Name]; !found {
+			/* Hey, let's just pretend that any
+			 * message we get in a channel that
+			 * we don't know about is effectively
+			 * an invite. */
+			processSlackInvite(channel.Name, msg)
+		}
+	}
+
+	if msg.User == info.User.ID {
+		/* Ignore our own messages. */
+		return
+	}
+
+	r := getRecipientFromMessage(fmt.Sprintf("%s@%s", msg.User, msg.Channel), "slack")
+	updateSeen(r, msg.Text)
+	jbotDebug(CHANNELS)
+
+	/* Slack "helpfully" hyperlinks text that
+	 * looks like a URL:
+	 * "foo www.yahoo.com" becomes "foo <http://www.yahoo.com|www.yahoo.com>"
+	 * Undo that nonsense.
+	 *
+	 * Note: Slack will also do all sorts of other
+	 * encoding and linking, but to undo all of
+	 * that would quickly become way too complex,
+	 * so here we only undo the simplest cases to
+	 * allow users to pass hostnames. */
+	txt := msg.Text
+	unlink_re := regexp.MustCompile("(<http://(.+)\\|(.+)>)")
+	if m := unlink_re.FindStringSubmatch(msg.Text); len(m) > 0 {
+		if m[2] == m[3] {
+			txt = unlink_re.ReplaceAllString(msg.Text, m[3])
+		}
+	}
+	processMessage(r, txt)
+}
+
 
 func randomLineFromUrl(theUrl string, useBy bool) (line string) {
 	rand.Seed(time.Now().UnixNano())
@@ -3342,12 +3889,27 @@ func readSavedData() {
 }
 
 func reply(r Recipient, msg string) {
-	if _, found := CHANNELS[r.ReplyTo]; found {
-		HIPCHAT_CLIENT.Say(r.Jid, CONFIG["fullName"], msg)
-	} else {
-		HIPCHAT_CLIENT.PrivSay(r.Jid, CONFIG["fullName"], msg)
+	if r.ChatType == "hipchat" {
+		if _, found := CHANNELS[r.ReplyTo]; found {
+			HIPCHAT_CLIENT.Say(r.Id, CONFIG["fullName"], msg)
+		} else {
+			HIPCHAT_CLIENT.PrivSay(r.Id, CONFIG["fullName"], msg)
+		}
+	} else if r.ChatType == "slack" {
+		recipient := r.ReplyTo
+		_, err := SLACK_CLIENT.GetChannelInfo(r.ReplyTo)
+		if err != nil {
+			/* A private message.  Now we
+			 * need to create a new IM Channel. */
+			_, _, id, err := SLACK_RTM.OpenIMChannel(r.Id)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Unable to open private channel: %s\n", err)
+				return
+			}
+			recipient = id
+		}
+		SLACK_RTM.SendMessage(SLACK_RTM.NewOutgoingMessage(msg, recipient))
 	}
-
 }
 
 func runCommand(cmd ...string) (out []byte, rval int) {
@@ -3412,16 +3974,29 @@ func serializeData() {
 	}
 }
 
-func updateRooms(rooms []*hipchat.Room) {
+func slackPeriodics() {
+	for _ = range time.Tick(PERIODICS * time.Second) {
+		users, err := SLACK_CLIENT.GetUsers()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Unable to get users: %s\n", err)
+		} else {
+			for _, u := range users {
+				SLACK_ROSTER[u.Name] = &u
+			}
+		}
+	}
+}
+
+func updateHipChatRooms(rooms []*hipchat.Room) {
 	for _, room := range rooms {
-		ROOMS[room.Id] = room
+		HIPCHAT_ROOMS[room.Id] = room
 	}
 }
 
 func updateRoster(users []*hipchat.User) {
 	for _, user := range users {
 		uid := strings.Split(user.Id, "@")[0]
-		ROSTER[uid] = user
+		HIPCHAT_ROSTER[uid] = user
 	}
 }
 
@@ -3435,45 +4010,61 @@ func updateSeen(r Recipient, msg string) {
 	curses_match := curses_re.FindAllString(msg, -1)
 
 	/* We don't keep track of priv messages, only public groupchat. */
-	if ch, chfound := CHANNELS[r.ReplyTo]; chfound {
-		var u *hipchat.User
+	if ch, chfound := getChannel(r.ChatType, r.ReplyTo); chfound {
 		var uInfo UserInfo
-		for _, u = range ROSTER {
-			if u.Name == r.Name {
-				break
-			}
-		}
-		if u == nil {
-			return
-		}
 
 		uInfo.Seen = fmt.Sprintf(time.Now().Format(time.UnixDate))
+		uInfo.Count = 1
+		uInfo.Curses = 0
+		uInfo.Praise = 0
+		uInfo.Id = r.Id
 
 		for _, curse := range curses_match {
 			CURSES[curse] = CURSES[curse] + 1
 		}
 
-		if t, found := ch.Users[*u]; found {
-			count := len(strings.Split(msg, "\n"))
-			if count > 1 {
-				count -= 1
-			}
-			uInfo.Curses = t.Curses + len(curses_match)
-			uInfo.Count = t.Count + count
-
-			/* Need to remember other counters here,
-			 * lest they be reset. */
-			uInfo.Praise = t.Praise
-		} else {
-			uInfo.Count = 1
-			uInfo.Curses = 0
+		count := len(strings.Split(msg, "\n"))
+		if count > 1 {
+			count -= 1
 		}
-		ch.Users[*u] = uInfo
+
+		if r.ChatType == "hipchat" {
+			var u *hipchat.User
+			for _, u = range HIPCHAT_ROSTER {
+				if u.Name == r.Name {
+					break
+				}
+			}
+			if u == nil {
+				return
+			}
+
+			if t, found := ch.HipChatUsers[*u]; found {
+				uInfo.Curses = t.Curses + len(curses_match)
+				uInfo.Count = t.Count + count
+
+				/* Need to remember other counters here,
+				 * lest they be reset. */
+				uInfo.Praise = t.Praise
+			}
+			ch.HipChatUsers[*u] = uInfo
+		} else if r.ChatType == "slack" {
+			if t, found := ch.SlackUsers[r.MentionName]; found {
+				uInfo.Curses = t.Curses + len(curses_match)
+				uInfo.Count = t.Count + count
+
+				/* Need to remember other counters here,
+				 * lest they be reset. */
+				uInfo.Praise = t.Praise
+			}
+			ch.SlackUsers[r.MentionName] = uInfo
+		}
 	}
 }
 
 func usage(out io.Writer) {
-	usage := `Usage: %v [-Vhv] [-c configFile]
+	usage := `Usage: %v [-DVhv] [-c configFile]
+	-D             enable debugging output
 	-V             print version information and exit
 	-c configFile  read configuration from configFile
 	-h             print this help and exit
@@ -3546,5 +4137,11 @@ func main() {
 		os.Exit(EXIT_FAILURE)
 	}()
 
-	doTheHipChat()
+	if len(CONFIG["hcService"]) > 0 {
+		doTheHipChat()
+	}
+	if len(CONFIG["slackService"]) > 0 {
+		doTheSlackChat()
+	}
+	select {}
 }

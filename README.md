@@ -4,18 +4,29 @@ can be found in the 'old/irc' subdir.
 
 This variant was created as a rewrite in Go for
 HipChat in July 2016 by Jan Schaumann (@jschauma /
-jschauma@netmeister.org).  Many thanks to Yahoo for
-letting me play around with nonsense like this.
+jschauma@netmeister.org).  Support for Slack was added
+in July 2017.  Many thanks to Yahoo for letting me
+play around with nonsense like this.
 
 You should be able to run the bot by populating a
 configuration file with suitable values.  The
 following configuration values are required:
 
+For HipChat:
 ```
-   password = the HipChat password of the bot user
-   jabberID = the HipChat / JabberID of the bot user
-   fullName = how the bot presents itself
-   mentionName = to which name the bot responds to
+hcPassword    = the HipChat password of the bot user
+     OR
+hcOauthToken  = the HipChat Oauth token for the bot user
+hcService     = the HipChat company prefix, e.g. <foo>.hipchat.com
+hcJabberID    = the HipChat / JabberID of the bot user
+fullName      = how the bot presents itself
+mentionName   = to which name the bot responds to
+```
+
+For Slack:
+```
+slackService  = the Slack service name, e.g. <foo>.slack.com
+slackToken    = the authentication token for your bot
 ```
 
 You may optionally also set the following
@@ -24,7 +35,6 @@ configuration values:
 ```
     channelFile = pathname where to store a state file
     debug = whether to enable debugging output
-    hcName = your hipchat service name
     opsgenieApiKey = an API key to access OpsGenie
 ```
 
@@ -57,6 +67,9 @@ Getting jbot to leave your channel:
 ```
 !leave
 ```
+
+(Note: on Slack, bots cannot leave a channel and
+require an admin to kick them.)
 
 
 jbot responds to:
@@ -542,6 +555,22 @@ Unset a per-channel setting.
 ```
 15:27 <jschauma> !whocyberedme
 15:27 <jbot> Crowd Strike confirms: The NSA cybered you using a PEBKAC DoS.
+```
+
+#### !whois &lt;domain&gt; -- show whois information
+
+```
+14:37 <jschauma> !whois yahoo.com
+14:37 <jbot> Registrar: MarkMonitor, Inc.
+14:37 <jbot> Registrar URL: http://www.markmonitor.com
+14:37 <jbot> Updated Date: 2017-06-29T11:36:33-0700
+14:37 <jbot> Creation Date: 1995-01-18T00:00:00-0800
+14:37 <jbot> Registrant Name: Domain Administrator
+14:37 <jbot> Registrant Organization: Yahoo! Inc.
+14:37 <jbot> Registrant Country: US
+14:37 <jbot> Registrant Email: domainadmin@yahoo-inc.com
+14:37 <jbot> Name Server: ns4.yahoo.com, ns2.yahoo.com, ns3.yahoo.com, ns5.yahoo.com, ns1.yahoo.com
+14:37 <jbot> DNSSEC: unsigned
 ```
 
 #### !wtf &lt;term&gt; -- decrypt acronyms
