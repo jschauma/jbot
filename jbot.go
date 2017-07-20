@@ -2261,6 +2261,59 @@ func cmdWhois(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdWiki(r Recipient, chName, args string) (result string) {
+	if len(args) < 1 {
+		result = "Usage: " + COMMANDS["wiki"].Usage
+		return
+	}
+
+	query := url.QueryEscape(args)
+	theUrl := fmt.Sprintf("%s%s", COMMANDS["wiki"].How, query)
+	data := getURLContents(theUrl, false)
+
+	/* json results are:
+	 * [ "query",
+	 *   ["terms", ...],
+	 *   ["first sentence", ...],
+	 *   [["url", ...]
+	 * ]
+	 */
+	var jsonData []interface{}
+	err := json.Unmarshal(data, &jsonData)
+	if err != nil {
+		result = fmt.Sprintf("Unable to unmarshal quote data: %s\n", err)
+		return
+	}
+
+	if len(jsonData) < 4 {
+		result = fmt.Sprintf("Something went bump when getting wiki json for '%s'.", args)
+		return
+	}
+
+	sentences := jsonData[2]
+	urls := jsonData[3]
+
+	if len(sentences.([]interface{})) < 1 {
+		result= fmt.Sprintf("No Wikipedia page found for '%s'.", args)
+		return
+	}
+
+	index := 0
+	result = sentences.([]interface{})[0].(string)
+
+	if strings.HasSuffix(result, " may refer to:") ||
+		strings.HasSuffix(result, " commonly refers to:") {
+		index = 1
+		result = sentences.([]interface{})[index].(string)
+	}
+
+	if len(urls.([]interface{})) > 0 {
+		result += "\n" + urls.([]interface{})[index].(string)
+	}
+	return
+}
+
+
 func cmdWtf(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["wtf"].Usage
@@ -3026,16 +3079,21 @@ func createCommands() {
 		"whois(1)",
 		"!whois <domain>",
 		nil}
-	COMMANDS["wtf"] = &Command{cmdWtf,
-		"decrypt acronyms",
-		"ywtf(1)",
-		"!wtf <term>",
-		nil}
 	COMMANDS["whocyberedme"] = &Command{cmdWhocyberedme,
 		"show who cybered you",
 		"https://whocybered.me",
 		"!whocyberedme",
 		[]string{"attribution"}}
+	COMMANDS["wiki"] = &Command{cmdWiki,
+		"look up a term on Wikipedia",
+		"https://en.wikipedia.org/w/api.php?action=opensearch&redirects=resolve&search=",
+		"!wiki <something>",
+		nil}
+	COMMANDS["wtf"] = &Command{cmdWtf,
+		"decrypt acronyms",
+		"ywtf(1)",
+		"!wtf <term>",
+		nil}
 }
 
 func jbotDebug(in interface{}) {
@@ -3256,12 +3314,23 @@ func getRecipientFromMessage(mfrom string, chatType string) (r Recipient) {
 			}
 		}
 	} else if chatType == "slack" {
+		/* Format is "user@channel"; if no
+		 * "user" component, then we have a
+		 * privmsg, which is a private
+		 * channel. We can't deal with that
+		 * (for now), so ignore. */
+
+		index := 0
+		if strings.HasPrefix(mfrom, "@") {
+			index = 1
+		}
+
 		from := strings.Split(mfrom, "@")
-		r.Id = from[0]
+		r.Id = strings.Trim(from[index], "@")
 		r.ReplyTo = from[1]
 		user, err := SLACK_CLIENT.GetUserInfo(r.Id)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Unknown user: %s\n", mfrom)
+			/* privmsg; let's just ignore it */
 		} else {
 			r.Name = user.Profile.RealName
 			r.MentionName = user.Name
@@ -3624,12 +3693,13 @@ func processCommands(r Recipient, invocation, line string) {
 			who = user.Name
 		}
 	}
-	verbose(fmt.Sprintf("#%s: '%s'", who, line), 2)
 
 	args := strings.Fields(line)
 	if len(args) < 1 {
 		return
 	}
+
+	verbose(fmt.Sprintf("#%s: '%s'", who, line), 2)
 
 	var cmd string
 	if strings.EqualFold(args[0], CONFIG["mentionName"]) {
@@ -3770,7 +3840,9 @@ func processHipChatMessage(message *hipchat.Message) {
 
 func processMessage(r Recipient, msg string) {
 
-	command_re := regexp.MustCompile(fmt.Sprintf("^(?i)(!|[@/]%s [/!]?)", CONFIG["mentionName"]))
+	command_re := regexp.MustCompile(fmt.Sprintf("^(?i)(!|[@/]%s [/!]?|@?%s !)",
+						CONFIG["mentionName"],
+						CONFIG["mentionName"]))
 	if command_re.MatchString(msg) {
 		matchEnd := command_re.FindStringIndex(msg)[1]
 		go processCommands(r, msg[0:matchEnd], msg[matchEnd:])
@@ -3819,7 +3891,7 @@ func processSlackMessage(msg *slack.MessageEvent) {
 
 	channel , err := SLACK_CLIENT.GetChannelInfo(msg.Channel)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to find channel information for channel '%s'.\n", msg.Channel)
+		/* privmsg, using a private channel; ignore */
 	} else {
 		if _, found := CHANNELS[channel.Name]; !found {
 			/* Hey, let's just pretend that any
@@ -3903,7 +3975,7 @@ func reply(r Recipient, msg string) {
 			 * need to create a new IM Channel. */
 			_, _, id, err := SLACK_RTM.OpenIMChannel(r.Id)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Unable to open private channel: %s\n", err)
+				fmt.Fprintf(os.Stderr, "Unable to open private channel: %s\n%v\n", err, r)
 				return
 			}
 			recipient = id
