@@ -375,21 +375,33 @@ func cmdBeer(r Recipient, chName, args string) (result string) {
 }
 
 func cmdChannels(r Recipient, chName, args string) (result string) {
-	var channels []string
+	var hipChatChannels []string
+	var slackChannels []string
 
 	if len(CHANNELS) == 0 {
 		result = "I'm not currently in any channels."
 	} else if len(CHANNELS) == 1 {
 		result = "I'm only here right now: "
-	} else {
-		result = fmt.Sprintf("I'm in the following %d channels:\n", len(CHANNELS))
 	}
 
-	for ch := range CHANNELS {
-		channels = append(channels, ch)
+	for ch, chInfo := range CHANNELS {
+		if chInfo.Type == "hipchat" {
+			hipChatChannels = append(hipChatChannels, ch)
+		} else if chInfo.Type == "slack" {
+			slackChannels = append(slackChannels, ch)
+		}
 	}
-	sort.Strings(channels)
-	result += strings.Join(channels, ", ")
+	sort.Strings(hipChatChannels)
+	sort.Strings(slackChannels)
+	if len(hipChatChannels) > 0 {
+		result = fmt.Sprintf("I'm in the following %d HipChat channels:\n", len(hipChatChannels))
+		result += strings.Join(hipChatChannels, ", ") + "\n"
+	}
+	if len(slackChannels) > 0 {
+		result += fmt.Sprintf("I'm in the following %d Slack channels:\n", len(slackChannels))
+		result += strings.Join(slackChannels, ", ")
+	}
+
 	return
 }
 
@@ -875,11 +887,18 @@ func cmdMonkeyStab(r Recipient, chName, args string) (result string) {
 
 func cmdOncall(r Recipient, chName, args string) (result string) {
 	oncall := args
+	oncall_source := "user input"
 	if len(strings.Fields(oncall)) < 1 {
 		if ch, found := getChannel(r.ChatType, r.ReplyTo); found {
-			oncall = r.ReplyTo
+			if r.ChatType == "hipchat" {
+				oncall = r.ReplyTo
+			} else {
+				oncall = ch.Name
+			}
+			oncall_source = "channel name"
 			if v, found := ch.Settings["oncall"]; found {
 				oncall = v
+				oncall_source = "channel setting"
 			}
 		} else {
 			result = "Usage: " + COMMANDS["oncall"].Usage
@@ -889,7 +908,17 @@ func cmdOncall(r Recipient, chName, args string) (result string) {
 
 	result += cmdOncallOpsGenie(r, chName, oncall, true)
 	if len(result) < 1 {
-		result = fmt.Sprintf("No oncall information found for '%s'.", oncall)
+		result = fmt.Sprintf("No oncall information found for '%s'.\n", oncall)
+	}
+
+	if strings.HasPrefix(result, "No OpsGenie schedule found for") {
+		switch oncall_source {
+		case "channel name":
+			result += fmt.Sprintf("\nIf your oncall rotation does not match your channel name (%s), use '!set oncall=<rotation_name>'.\n", chName)
+		case "channel setting":
+			result += fmt.Sprintf("\nIs your 'oncall' channel setting (%s) correct?\n", oncall)
+			result += "If not, use '!set oncall=<rotation_name>' to fix that.\n"
+		}
 	}
 	return
 }
@@ -1996,8 +2025,6 @@ func cmdWeather(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	jbotDebug(jsonData)
-
 	jsonOutput := jsonData["query"]
 	jsonResults := jsonOutput.(map[string]interface{})["results"]
 	jsonCount := jsonOutput.(map[string]interface{})["count"].(float64)
@@ -2312,7 +2339,6 @@ func cmdWiki(r Recipient, chName, args string) (result string) {
 	}
 	return
 }
-
 
 func cmdWtf(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
@@ -2692,7 +2718,7 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 			"#yubifail",
 			"You should double-rot13 that.",
 			"Uh-oh, now you're pwned.",
-			"s/^eidcc[a-z]*$/whoops/",
+			fmt.Sprintf("%s s/^eidcc[a-z]*$/whoops/", r.MentionName),
 			"Access denied!",
 			"Please try again later.",
 			"IF YOU DON'T SEE THE FNORD IT CAN'T EAT YOU",
@@ -3137,7 +3163,7 @@ func doTheHipChat() {
 	HIPCHAT_CLIENT.RequestRooms()
 
 	for _, ch := range CHANNELS {
-		verbose(fmt.Sprintf("Joining #%s...", ch.Name), 1)
+		verbose(fmt.Sprintf("Joining HipChat channel #%s...", ch.Name), 1)
 		HIPCHAT_CLIENT.Join(ch.Id, CONFIG["fullName"])
 
 		/* Our state file might not contain
@@ -3280,15 +3306,23 @@ func getChannel(chatType, id string) (ch *Channel, ok bool) {
 
 	if chatType == "slack" {
 		slackChannel, err := SLACK_CLIENT.GetChannelInfo(id)
-		if err != nil {
-			return
+		if err == nil {
+			id = slackChannel.Name
+		} else {
+			/* This might be in a private
+			 * channel, which Slack calls
+			 * a 'Group'.  Let's try that:
+			 */
+			if group, err := SLACK_CLIENT.GetGroupInfo(id); err == nil {
+				id = group.Name
+			}
 		}
-		id = slackChannel.Name
 	}
 
 	if ch, found = CHANNELS[id]; found {
 		ok = true
 	}
+
 	return
 }
 
@@ -3432,7 +3466,7 @@ func isThrottled(throttle string, ch *Channel) (is_throttled bool) {
 }
 
 func leave(r Recipient, channelFound bool, msg string, command bool) {
-	verbose(fmt.Sprintf("%s asked us to leave %s.", r.Name, r.ReplyTo), 2)
+	verbose(fmt.Sprintf("%s asked us to leave %s on %s.", r.Name, r.ReplyTo, r.ChatType), 2)
 	if !command && !strings.Contains(msg, "please") {
 		reply(r, "Please ask politely.")
 		return
@@ -3699,7 +3733,7 @@ func processCommands(r Recipient, invocation, line string) {
 		return
 	}
 
-	verbose(fmt.Sprintf("#%s: '%s'", who, line), 2)
+	verbose(fmt.Sprintf("%s #%s: '%s'", r.ChatType, who, line), 2)
 
 	var cmd string
 	if strings.EqualFold(args[0], CONFIG["mentionName"]) {
@@ -3801,7 +3835,7 @@ func processHipChatInvite(r Recipient, invite string) {
 
 	verbose(fmt.Sprintf("I was invited into '%s' (%s) by '%s'.", channelName, r.Id, from), 2)
 	CHANNELS[channelName] = &ch
-	verbose(fmt.Sprintf("Joining #%s...", ch.Name), 1)
+	verbose(fmt.Sprintf("Joining HipChat #%s...", ch.Name), 1)
 	HIPCHAT_CLIENT.Join(r.Id, CONFIG["fullName"])
 }
 
@@ -3880,7 +3914,7 @@ func processSlackInvite(name string, msg *slack.MessageEvent) {
 		ch.Toggles[t] = v
 	}
 
-	verbose(fmt.Sprintf("I was invited into '%s' (%s) by '%s'.", ch.Name, ch.Id, ch.Inviter), 2)
+	verbose(fmt.Sprintf("I was invited into Slack '%s' (%s) by '%s'.", ch.Name, ch.Id, ch.Inviter), 2)
 	CHANNELS[ch.Name] = &ch
 }
 
@@ -3889,17 +3923,25 @@ func processSlackMessage(msg *slack.MessageEvent) {
 	jbotDebug(fmt.Sprintf("Message: %v\n", msg))
 	info := SLACK_RTM.GetInfo()
 
-	channel , err := SLACK_CLIENT.GetChannelInfo(msg.Channel)
-	if err != nil {
-		/* privmsg, using a private channel; ignore */
+	var channelName string
+
+	channel, err := SLACK_CLIENT.GetChannelInfo(msg.Channel)
+	if err == nil {
+		channelName = channel.Name
 	} else {
-		if _, found := CHANNELS[channel.Name]; !found {
-			/* Hey, let's just pretend that any
-			 * message we get in a channel that
-			 * we don't know about is effectively
-			 * an invite. */
-			processSlackInvite(channel.Name, msg)
+		group, err := SLACK_CLIENT.GetGroupInfo(msg.Channel)
+		if err == nil {
+			channelName = group.Name
 		}
+		/* else: privmsg, using a private channel; ignore */
+	}
+
+	if _, found := CHANNELS[channelName]; !found {
+		/* Hey, let's just pretend that any
+		 * message we get in a channel that
+		 * we don't know about is effectively
+		 * an invite. */
+		processSlackInvite(channel.Name, msg)
 	}
 
 	if msg.User == info.User.ID {
@@ -3971,14 +4013,23 @@ func reply(r Recipient, msg string) {
 		recipient := r.ReplyTo
 		_, err := SLACK_CLIENT.GetChannelInfo(r.ReplyTo)
 		if err != nil {
-			/* A private message.  Now we
-			 * need to create a new IM Channel. */
-			_, _, id, err := SLACK_RTM.OpenIMChannel(r.Id)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Unable to open private channel: %s\n%v\n", err, r)
-				return
+			/* This might be in a private
+			 * channel, which Slack calls
+			 * a 'Group'.  Let's try that:
+			 */
+			group, err := SLACK_CLIENT.GetGroupInfo(r.ReplyTo)
+			if err == nil {
+				recipient = group.ID
+			} else {
+				/* A private message.  Now we
+				 * need to create a new IM Channel. */
+				_, _, id, err := SLACK_RTM.OpenIMChannel(r.Id)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Unable to open private channel: %s\n%v\n", err, r)
+					return
+				}
+				recipient = id
 			}
-			recipient = id
 		}
 		SLACK_RTM.SendMessage(SLACK_RTM.NewOutgoingMessage(msg, recipient))
 	}
@@ -4121,6 +4172,9 @@ func updateSeen(r Recipient, msg string) {
 			}
 			ch.HipChatUsers[*u] = uInfo
 		} else if r.ChatType == "slack" {
+			if len(ch.SlackUsers) < 1 {
+				ch.SlackUsers = make(map[string]UserInfo, 0)
+			}
 			if t, found := ch.SlackUsers[r.MentionName]; found {
 				uInfo.Curses = t.Curses + len(curses_match)
 				uInfo.Count = t.Count + count
