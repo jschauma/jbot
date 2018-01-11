@@ -375,6 +375,416 @@ func cmdBeer(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdBs(r Recipient, chName, args string) (result string) {
+
+	var adverbs = []string{
+			"appropriately",
+			"assertively",
+			"authoritatively",
+			"collaboratively",
+			"compellingly",
+			"competently",
+			"completely",
+			"continually",
+			"conveniently",
+			"credibly",
+			"distinctively",
+			"dramatically",
+			"dynamically",
+			"efficiently",
+			"energistically",
+			"enthusiastically",
+			"fungibly",
+			"globally",
+			"holisticly",
+			"interactively",
+			"intrinsically",
+			"monotonectally",
+			"objectively",
+			"phosfluorescently",
+			"proactively",
+			"professionally",
+			"progressively",
+			"quickly",
+			"rapidiously",
+			"seamlessly",
+			"synergistically",
+			"uniquely",
+			}
+
+	var verbs = []string {
+			"actualize",
+			"administrate",
+			"aggregate",
+			"architect",
+			"benchmark",
+			"brand",
+			"build",
+			"cloudify",
+			"communicate",
+			"conceptualize",
+			"coordinate",
+			"create",
+			"cultivate",
+			"customize",
+			"deliver",
+			"deploy",
+			"develop",
+			"disintermediate",
+			"disseminate",
+			"drive",
+			"e-enable",
+			"embrace",
+			"empower",
+			"enable",
+			"engage",
+			"engineer",
+			"enhance",
+			"envisioneer",
+			"evisculate",
+			"evolve",
+			"expedite",
+			"exploit",
+			"extend",
+			"fabricate",
+			"facilitate",
+			"fashion",
+			"formulate",
+			"foster",
+			"generate",
+			"grow",
+			"harness",
+			"impact",
+			"implement",
+			"incentivize",
+			"incubate",
+			"initiate",
+			"innovate",
+			"integrate",
+			"iterate",
+			"leverageexisting",
+			"leverageother's",
+			"maintain",
+			"matrix",
+			"maximize",
+			"mesh",
+			"monetize",
+			"morph",
+			"myocardinate",
+			"negotiate",
+			"network",
+			"optimize",
+			"orchestrate",
+			"paralleltask",
+			"plagiarize",
+			"pontificate",
+			"predominate",
+			"procrastinate",
+			"productivate",
+			"productize",
+			"promote",
+			"provideaccessto",
+			"pursue",
+			"re-engineer",
+			"recaptiualize",
+			"reconceptualize",
+			"redefine",
+			"reintermediate",
+			"reinvent",
+			"repurpose",
+			"restore",
+			"revolutionize",
+			"right-shore",
+			"scale",
+			"seize",
+			"simplify",
+			"strategize",
+			"streamline",
+			"supply",
+			"syndicate",
+			"synergize",
+			"synthesize",
+			"target",
+			"transform",
+			"transition",
+			"underwhelm",
+			"unleash",
+			"utilize",
+			"visualize",
+			"whiteboard",
+			}
+
+	var adjectives = []string{
+			"24/365",
+			"24/7",
+			"B2B",
+			"B2C",
+			"accurate",
+			"adaptive",
+			"agile",
+			"alternative",
+			"anexpandedarrayof",
+			"backend",
+			"backward-compatible",
+			"best-of-breed",
+			"bleeding-edge",
+			"bricks-and-clicks",
+			"business",
+			"clicks-and-mortar",
+			"client-based",
+			"client-centered",
+			"client-centric",
+			"client-focused",
+			"cloud-based",
+			"cloud-centric",
+			"cloud-ready",
+			"cloudified",
+			"collaborative",
+			"compelling",
+			"competitive",
+			"cooperative",
+			"corporate",
+			"costeffective",
+			"covalent",
+			"cross-media",
+			"cross-platform",
+			"cross-unit",
+			"crossfunctional",
+			"customer directed",
+			"customized",
+			"cutting-edge",
+			"distinctive",
+			"distributed",
+			"diverse",
+			"dynamic",
+			"e-business",
+			"economically sound",
+			"effective",
+			"efficient",
+			"elastic",
+			"emerging",
+			"empowered",
+			"enabled",
+			"end-to-end",
+			"enterprise",
+			"enterprise-wide",
+			"equity invested",
+			"error-free",
+			"ethical",
+			"excellent",
+			"exceptional",
+			"extensible",
+			"extensive",
+			"flexible",
+			"focused",
+			"frictionless",
+			"front-end",
+			"fully researched",
+			"fully tested",
+			"functional",
+			"functionalized",
+			"fungible",
+			"future-proof",
+			"global",
+			"goal-oriented",
+			"goforward",
+			"granular",
+			"high-payoff",
+			"high-quality",
+			"highlyefficient",
+			"highstandardsin",
+			"holistic",
+			"hyper-scale",
+			"impactful",
+			"inexpensive",
+			"innovative",
+			"installedbase",
+			"integrated",
+			"interactive",
+			"interdependent",
+			"intermandated",
+			"interoperable",
+			"intuitive",
+			"justintime",
+			"leading-edge",
+			"leveraged",
+			"long-termhigh-impact",
+			"low-riskhigh-yield",
+			"magnetic",
+			"maintainable",
+			"market-driven",
+			"marketpositioning",
+			"mission-critical",
+			"multidisciplinary",
+			"multifunctional",
+			"multimedia based",
+			"next-generation",
+			"on-demand",
+			"one-to-one",
+			"open-source",
+			"optimal",
+			"orthogonal",
+			"out-of-the-box",
+			"pandemic",
+			"parallel",
+			"performancebased",
+			"plug-and-play",
+			"premier",
+			"premium",
+			"principle-centered",
+			"proactive",
+			"process-centric",
+			"professional",
+			"progressive",
+			"prospective",
+			"quality",
+			"real-time",
+			"reliable",
+			"resource-leveling",
+			"resource-maximizing",
+			"resource-sucking",
+			"revolutionary",
+			"robust",
+			"scalable",
+			"seamless",
+			"stand-alone",
+			"standardized",
+			"standardscompliant",
+			"stateoftheart",
+			"sticky",
+			"strategic",
+			"superior",
+			"sustainable",
+			"synergistic",
+			"tactical",
+			"teambuilding",
+			"teamdriven",
+			"technicallysound",
+			"timely",
+			"top-line",
+			"transparent",
+			"turnkey",
+			"ubiquitous",
+			"unique",
+			"user-centric",
+			"userfriendly",
+			"value-added",
+			"vertical",
+			"viral",
+			"virtual",
+			"visionary",
+			"web-enabled",
+			"wireless",
+			"world-class",
+			"worldwide",
+			}
+
+	var nouns = []string{
+			"'outsidethebox' thinking",
+			"ROI",
+			"actionitems",
+			"alignments",
+			"applications",
+			"architectures",
+			"bandwidth",
+			"benefits",
+			"best practices",
+			"catalysts for change",
+			"channels",
+			"clouds",
+			"collaborationandidea-sharing",
+			"communities",
+			"content",
+			"convergence",
+			"core competencies",
+			"customer service",
+			"data",
+			"deliverables",
+			"e-business",
+			"e-commerce",
+			"e-markets",
+			"e-services",
+			"e-tailers",
+			"experiences",
+			"expertise",
+			"functionalities",
+			"fungibility",
+			"growth strategies",
+			"human capital",
+			"ideas",
+			"imperatives",
+			"infomediaries",
+			"information",
+			"infrastructures",
+			"initiatives",
+			"innovation",
+			"intellectual capital",
+			"interfaces",
+			"internal or 'organic' sources",
+			"leadership",
+			"leadership skills",
+			"manufactured products",
+			"markets",
+			"materials",
+			"meta-services",
+			"methodologies",
+			"methods of empowerment",
+			"metrics",
+			"mindshare",
+			"models",
+			"networks",
+			"niche markets",
+			"niches",
+			"nosql",
+			"opportunities",
+			"outsourcing",
+			"paradigms",
+			"partnerships",
+			"platforms",
+			"portals",
+			"potentialities",
+			"processes",
+			"process improvements",
+			"products",
+			"quality vectors",
+			"relationships",
+			"resources",
+			"results",
+			"scenarios",
+			"schemas",
+			"scrums",
+			"services",
+			"solutions",
+			"sources",
+			"sprints",
+			"storage",
+			"strategic theme areas",
+			"supplychains",
+			"synergy",
+			"systems",
+			"technologies",
+			"technology",
+			"testing procedures",
+			"total linkage",
+			"users",
+			"value",
+			"virtualization",
+			"vortals",
+			"web-readiness",
+			"webservices",
+			"wins",
+			}
+
+	rand.Seed(time.Now().UnixNano())
+	result = adverbs[rand.Intn(len(adverbs))] + " " +
+		verbs[rand.Intn(len(verbs))] + " " +
+		adjectives[rand.Intn(len(adjectives))] + " " +
+		nouns[rand.Intn(len(nouns))]
+
+	return
+}
+
+
 func cmdChannels(r Recipient, chName, args string) (result string) {
 	var hipChatChannels []string
 	var slackChannels []string
@@ -884,6 +1294,75 @@ func cmdMonkeyStab(r Recipient, chName, args string) (result string) {
 	}
 
 	result = fmt.Sprintf("/me unleashes a troop of pen-wielding stabbing-monkeys on %s!\n", args)
+	return
+}
+
+func cmdOid(r Recipient, chName, args string) (result string) {
+	oids := strings.Split(args, " ")
+	if len(args) < 1 || len(oids) != 1 {
+		result = "Usage: " + COMMANDS["oid"].Usage
+		return
+	}
+
+	oid := strings.TrimSpace(oids[0])
+
+	theUrl := fmt.Sprintf("%s%s", COMMANDS["oid"].How, oid)
+	data := getURLContents(theUrl, false, true)
+
+	info_key := ""
+	found := false
+	info := map[string]string{}
+
+	asn_re := regexp.MustCompile(`(?i)^\s*<textarea.*readonly>({.*})</textarea>`)
+	info_re := regexp.MustCompile(`(?i)^\s*<br><strong>(.*)</strong>:`)
+
+	for _, line := range strings.Split(string(data), "\n") {
+		if m := asn_re.FindStringSubmatch(line); len(m) > 0 {
+			info["ASN.1 notation"] = m[1]
+			continue
+		}
+
+		if m := info_re.FindStringSubmatch(line); len(m) > 0 {
+			found = true
+			info_key = m[1]
+			continue
+		}
+
+		if strings.Contains(line, "<br><br>") {
+			found = false
+			if info_key == "Information" {
+				break
+			} else {
+				continue
+			}
+		}
+
+		if found {
+			oneLine := dehtmlify(line)
+			if len(oneLine) > 1 {
+				if _, ok := info[info_key]; !ok {
+					info[info_key] = oneLine
+				} else {
+					info[info_key] += "\n" + oneLine
+				}
+			}
+		}
+	}
+
+	if len(info) < 1 {
+		result = fmt.Sprintf("No info found for OID '%s'.", oid)
+	} else {
+		var keys []string
+		for k, _ := range info {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			result += fmt.Sprintf("%s: %s\n", k, info[k])
+		}
+	}
+
 	return
 }
 
@@ -2906,6 +3385,11 @@ func createCommands() {
 		"https://www.beeradvocate.com/",
 		"!beer <beer>",
 		nil}
+	COMMANDS["bs"] = &Command{cmdBs,
+		"Corporate B.S. Generator",
+		"builtin, but inspired from http://www.atrixnet.com/bs-generator.html",
+		"!bs",
+		nil}
 	COMMANDS["channels"] = &Command{cmdChannels,
 		"display channels I'm in",
 		"builtin",
@@ -2990,6 +3474,11 @@ func createCommands() {
 		"unleash a troop of pen-wielding stabbing monkeys",
 		"builtin",
 		"!monkeystab <something>",
+		nil}
+	COMMANDS["oid"] = &Command{cmdOid,
+		"display OID information",
+		"http://oid-info.com/cgi-bin/display?action=display&oid=",
+		"!oid <oid>",
 		nil}
 	COMMANDS["oncall"] = &Command{cmdOncall,
 		"show who's oncall",
@@ -3228,7 +3717,6 @@ func doTheSlackChat() {
 		fmt.Fprintf(os.Stderr, "Unable to get my own ID!\n")
 	}
 
-
 	SLACK_RTM = SLACK_CLIENT.NewRTM()
 	go SLACK_RTM.ManageConnection()
 
@@ -3427,16 +3915,19 @@ func getSortedKeys(hash map[string]int, rev bool) (sorted []string) {
 	return
 }
 
-/* If 'sso' is true, then the URL requires access credentials. */
-func getURLContents(givenUrl string, sso ...bool) (data []byte) {
-	verbose(3, "Fetching %s (BY: %v)...", givenUrl, sso[0])
+/* Additional arguments can influence how the request is made:
+ * - if args[0] is true, then the URL requires access credentials
+ * - if args[1] is true, then we fake the User-Agent
+ */
+func getURLContents(givenUrl string, args ...bool) (data []byte) {
+	verbose(3, "Fetching %s (%v)...", givenUrl, args)
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to initialize cookie jar: %s\n", err)
 		return
 	}
 
-	if len(sso) > 0 && sso[0] {
+	if len(args) > 0 && args[0] {
 		/* get a fresh cookie for protected internal sites */
 		// COOKIES = c
 	}
@@ -3447,21 +3938,32 @@ func getURLContents(givenUrl string, sso ...bool) (data []byte) {
 		return
 	}
 
-	if sso[0] {
+	if args[0] {
 		jar.SetCookies(u, COOKIES)
 	}
 	client := http.Client{
 		Jar: jar,
 	}
 
-	r, err := client.Get(givenUrl)
+	request, err := http.NewRequest("GET", givenUrl, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to get '%s': %s\n", givenUrl, err)
+		fmt.Fprintf(os.Stderr, "Unable to create new request for '%s': %s\n", givenUrl, err)
 		return
 	}
-	defer r.Body.Close()
 
-	data, err = ioutil.ReadAll(r.Body)
+	if len(args) > 1 && args[1] {
+		request.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36")
+	}
+
+	response, err := client.Do(request)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to GET '%s': $s\n", givenUrl, err)
+		return
+	}
+
+	defer response.Body.Close()
+
+	data, err = ioutil.ReadAll(response.Body)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to read body of '%s': %s\n", givenUrl, err)
 		return
@@ -4158,13 +4660,13 @@ func slackPeriodics() {
 }
 
 func slackUpdateRoster() {
-		users, err := SLACK_CLIENT.GetUsers()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Unable to get users: %s\n", err)
-		} else {
-			for _, u := range users {
-			SLACK_ROSTER[u.Name] = u
-		}
+	verbose(1, "Updating Slack roster...")
+	users, err := SLACK_CLIENT.GetUsers()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to get users: %s\n", err)
+	} else {
+		for _, u := range users {
+		SLACK_ROSTER[u.Name] = u
 	}
 }
 

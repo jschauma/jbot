@@ -1,4 +1,4 @@
-This is a HipChat version of the 'jbot' IRC bot,
+This is a HipChat / Slack version of the 'jbot' IRC bot,
 originally "developed" at Yahoo! in 2007, and which
 can be found in the 'old/irc' subdir.
 
@@ -145,6 +145,14 @@ E.g.:
 20:58 < jbot> American Porter (6.40%)
 20:58 < jbot> https://www.beeradvocate.com/beer/profile/31805/62761/
 ```
+
+#### !bs -- Corporate B.S. Generator
+
+```
+16:18 <jans> !bs
+16:18 <jbot> energistically reconceptualize real-time intellectual capital
+```
+
 
 #### !channels -- display channels I'm in
 
@@ -318,6 +326,18 @@ Note: possibly NSFW
 #### !leave -- cause me to leave the current channel
 
 Self-explanatory, hopefully.
+
+#### !oid &lt;oid&gt; -- display OID information
+
+```
+16:21 <jans> !oid 1.2.840.113549.1.1.1
+16:21 <jbot> ASN.1 notation: {iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-1(1)
+             rsaEncryption(1)}
+16:21 <jbot> Description: Rivest, Shamir and Adleman (RSA) encryption (and signing)
+16:21 <jbot> Information: Defined in IETF RFC 2313, IETF RFC 2437. See also IETF RFC 3370.
+16:21 <jbot> See also the equivalent but deprecated OID {joint-iso-itu-t(2) ds(5) algorithm(8)
+             encryptionAlgorithm(1) rsa(1)}.
+```
 
 #### !oncall &lt;group&gt; --- show who's oncall
 
