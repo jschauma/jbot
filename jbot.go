@@ -1,10 +1,12 @@
 /*
- * This is a HipChat version of the 'jbot' IRC bot,
- * originally developed at Yahoo! in 2007.  This
- * variant was created as a rewrite in Go for HipChat
- * in July 2016 by Jan Schaumann (@jschauma /
- * jschauma@netmeister.org).  Many thanks to Yahoo
- * for letting me play around with nonsense like this.
+ * This is a HipChat and Slack version of the 'jbot'
+ * IRC bot, originally developed at Yahoo! in 2007.
+ * This variant was created as a rewrite in Go for
+ * HipChat in July 2016 by Jan Schaumann (@jschauma
+ * / jschauma@netmeister.org); support for Slack was
+ * added some time in early 2017.  Many thanks to
+ * Yahoo for letting me play around with nonsense like
+ * this.
  *
  * You should be able to run the bot by populating a
  * configuration file with suitable values.  The
@@ -88,16 +90,27 @@ var CONFIG = map[string]string{
 	"configFile":       "/etc/jbot.conf",
 	"debug":            "no",
 	"fullName":         "",
+	"giphyApiKey":      "",
 	"hcControlChannel": "",
 	"hcJabberID":       "",
 	"hcOauthToken":     "",
 	"hcPassword":       "",
 	"hcService":        "",
+	"jiraPassword":     "",
+	"jiraUser":         "",
 	"mentionName":      "",
 	"opsgenieApiKey":   "",
 	"slackID":          "",
 	"slackService":     "",
 	"slackToken":       "",
+}
+
+var SECRETS = []string{
+	"byPassword",
+	"hcOauthToken",
+	"giphyApiKey",
+	"opsgenieApiKey",
+	"slackToken",
 }
 
 var HIPCHAT_CLIENT *hipchat.Client
@@ -113,7 +126,9 @@ var CURSES = map[string]int{}
 var COMMANDS = map[string]*Command{}
 
 var TOGGLES = map[string]bool{
+	"atnoyance":   true,
 	"chatter":     true,
+	"corpbs":      true,
 	"python":      true,
 	"trivia":      true,
 	"shakespeare": true,
@@ -137,13 +152,13 @@ var THANKYOU = []string{
 	"Always happy to help.",
 	"Thanks - this channel is my life!",
 	"I appreciate your appreciation.",
-	"/me giddily hops up and down.",
-	"/me struts his stuff.",
-	"/me proudly smiles.",
-	"/me nods approvingly.",
-	"/me grins sheepishly.",
-	"/me takes a bow.",
-	"/me blushes.",
+	"_giddily hops up and down._",
+	"_struts his stuff._",
+	"_proudly smiles._",
+	"_nods approvingly._",
+	"_grins sheepishly._",
+	"_takes a bow._",
+	"_blushes._",
 }
 
 var DONTKNOW = []string{
@@ -158,16 +173,31 @@ var DONTKNOW = []string{
 	"Oh, uhm, ...I don't know. Do you?",
 	"I could tell you, but then I'd have to kill you.",
 	"Wouldn't you like to know.",
-	"You're a curious little hip-chatter, aren't you?",
+	"You're a curious little hip-chatter, aren't you?\nUhm, no, wait, I mean: slacker. You're a slacker, that's it. A curious one.",
 	"I'm sorry, that's classified.",
 	"The answer lies within yourself.",
 	"You know, if you try real hard, I'm sure you can figure it out yourself.",
 	"Ask more politely, and I may tell you.",
 	"Oh, come on, you know.",
+	"I wish I could tell you. I really, really wish I could.",
+	"Think harder, slackerino!",
+	"_thinks harder and harder still, then quietly implodes. Too much thinking._",
+	"wat",
+	"I'm useless. My apologies.",
+	"Why are you asking *me*?",
 }
 
 var COOKIES []*http.Cookie
 var VERBOSITY int
+
+type PhishCount struct {
+	Count int
+	Total int
+	First time.Time
+}
+
+const PHISH_MAX = 5
+const PHISH_TIME = 60
 
 type Channel struct {
 	Inviter      string
@@ -179,6 +209,7 @@ type Channel struct {
 	HipChatUsers map[hipchat.User]UserInfo
 	SlackUsers   map[string]UserInfo
 	Settings     map[string]string
+	Phishy       *PhishCount
 }
 
 type CommandFunc func(Recipient, string, string) string
@@ -274,7 +305,7 @@ func cmdBacon(r Recipient, chName, args string) (result string) {
 	if pic || rand.Intn(4) == 0 {
 		result = cmdImage(r, chName, query)
 	} else {
-		data := getURLContents("http://baconipsum.com/?paras=1&type=all-meat", false)
+		data := getURLContents("http://baconipsum.com/?paras=1&type=all-meat", nil)
 		bacon_re := regexp.MustCompile(`anyipsum-output">(.*?\.)`)
 		for _, line := range strings.Split(string(data), "\n") {
 			if m := bacon_re.FindStringSubmatch(line); len(m) > 0 {
@@ -304,7 +335,7 @@ func cmdBeer(r Recipient, chName, args string) (result string) {
 	}
 
 	theUrl += url.QueryEscape(args)
-	data := getURLContents(theUrl, false)
+	data := getURLContents(theUrl, nil)
 
 	type Beer struct {
 		Abv      string
@@ -325,7 +356,7 @@ func cmdBeer(r Recipient, chName, args string) (result string) {
 			if m := beer_re.FindStringSubmatch(line); len(m) > 0 {
 				beer = Beer{"", "", m[3], m[2], "", m[1]}
 				theUrl = fmt.Sprintf("%s%s", COMMANDS["beer"].How, m[1])
-				data := getURLContents(theUrl, false)
+				data := getURLContents(theUrl, nil)
 				style_re := regexp.MustCompile(`<b>Style:</b> <a href=.*><b>(.*)</b></a>`)
 				abv_re := regexp.MustCompile(`<b>Alcohol by volume \(ABV\):</b> (.*)`)
 				next := false
@@ -376,6 +407,20 @@ func cmdBeer(r Recipient, chName, args string) (result string) {
 }
 
 func cmdBs(r Recipient, chName, args string) (result string) {
+
+	answer := ""
+
+	rand.Seed(time.Now().UnixNano())
+	if len(args) > 0 && args == "chatter" {
+		var s = []string {
+			fmt.Sprintf("Well, @%s, instead, you should probably", r.MentionName),
+			"A better idea:",
+			"Or perhaps",
+			"Team! Let's",
+		}
+
+		answer = s[rand.Intn(len(s))] + " "
+	}
 
 	var adverbs = []string{
 			"appropriately",
@@ -462,8 +507,8 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 			"innovate",
 			"integrate",
 			"iterate",
-			"leverageexisting",
-			"leverageother's",
+			"leverage existing",
+			"leverage other's",
 			"maintain",
 			"matrix",
 			"maximize",
@@ -483,7 +528,7 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 			"productivate",
 			"productize",
 			"promote",
-			"provideaccessto",
+			"provide accessto",
 			"pursue",
 			"re-engineer",
 			"recaptiualize",
@@ -523,7 +568,7 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 			"adaptive",
 			"agile",
 			"alternative",
-			"anexpandedarrayof",
+			"an expanded array of",
 			"backend",
 			"backward-compatible",
 			"best-of-breed",
@@ -591,8 +636,8 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 			"granular",
 			"high-payoff",
 			"high-quality",
-			"highlyefficient",
-			"highstandardsin",
+			"highly efficient",
+			"high standards in",
 			"holistic",
 			"hyper-scale",
 			"impactful",
@@ -613,7 +658,7 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 			"magnetic",
 			"maintainable",
 			"market-driven",
-			"marketpositioning",
+			"market positioning",
 			"mission-critical",
 			"multidisciplinary",
 			"multifunctional",
@@ -681,6 +726,7 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 
 	var nouns = []string{
 			"'outsidethebox' thinking",
+			"IoT",
 			"ROI",
 			"actionitems",
 			"alignments",
@@ -689,6 +735,7 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 			"bandwidth",
 			"benefits",
 			"best practices",
+			"blockchain",
 			"catalysts for change",
 			"channels",
 			"clouds",
@@ -697,6 +744,7 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 			"content",
 			"convergence",
 			"core competencies",
+			"crypto currencies",
 			"customer service",
 			"data",
 			"deliverables",
@@ -775,11 +823,12 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 			"wins",
 			}
 
-	rand.Seed(time.Now().UnixNano())
-	result = adverbs[rand.Intn(len(adverbs))] + " " +
+	answer += adverbs[rand.Intn(len(adverbs))] + " " +
 		verbs[rand.Intn(len(verbs))] + " " +
 		adjectives[rand.Intn(len(adjectives))] + " " +
-		nouns[rand.Intn(len(nouns))]
+		nouns[rand.Intn(len(nouns))] + "!"
+
+	result = answer
 
 	return
 }
@@ -866,7 +915,7 @@ func cmdCowsay(r Recipient, chName, args string) (result string) {
 	}
 
 	out, _ := runCommand("cowsay " + args)
-	result += "/code\n" + string(out)
+	result += "```\n" + string(out) + "```\n"
 
 	return
 }
@@ -954,7 +1003,7 @@ func cmdCve(r Recipient, chName, args string) (result string) {
 	}
 
 	theUrl := fmt.Sprintf("%s%s", COMMANDS["cve"].How, cve)
-	data := getURLContents(theUrl, false)
+	data := getURLContents(theUrl, nil)
 
 	info := []string{}
 
@@ -1020,7 +1069,7 @@ func cmdFml(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	data := getURLContents(COMMANDS["fml"].How, false)
+	data := getURLContents(COMMANDS["fml"].How, nil)
 
 	fml_re := regexp.MustCompile(`(?i)^(Today, .*FML)$`)
 	for _, line := range strings.Split(string(data), "\n") {
@@ -1041,6 +1090,72 @@ func cmdFortune(r Recipient, chName, args string) (result string) {
 
 	out, _ := runCommand("fortune -s")
 	result = string(out)
+
+	return
+}
+
+func cmdGiphy(r Recipient, chName, args string) (result string) {
+	key := CONFIG["giphyApiKey"]
+	if len(key) < 1 {
+		result = "Sorry - no giphy API key in config file!\n"
+		result += "Try '!img' instead?\n"
+		result += "I know, it's not the same..."
+		return
+	}
+
+	theUrl := COMMANDS["giphy"].How
+	if len(args) < 1 {
+		theUrl = strings.Replace(theUrl, "search", "random?", 1)
+	} else {
+		if args == "jbot" {
+			result = "https://jbot.corp.yahoo.com/jbot.gif"
+			return
+		}
+		theUrl += "?q=" + url.QueryEscape(args)
+	}
+
+	theUrl += "&api_key=" + url.QueryEscape(key)
+	theUrl += "&rating=g&limit=30"
+	data := getURLContents(theUrl, nil)
+
+	var giphyJson map[string]interface{}
+	err := json.Unmarshal(data, &giphyJson)
+	if err != nil {
+		result = fmt.Sprintf("Unable to unmarshal giphy data: %s\n", err)
+		return
+	}
+
+	if _, found := giphyJson["meta"]; !found {
+		fmt.Fprintf(os.Stderr, "+++ giphy fail: %v\n", giphyJson)
+		result = fmt.Sprintf("No data received from giphy!")
+		return
+	}
+
+	status := giphyJson["meta"].(map[string]interface{})["status"].(float64)
+
+	if status != 200 {
+		fmt.Fprintf(os.Stderr, "+++ giphy return status %d: %v\n", status, giphyJson)
+		result = fmt.Sprintf("Giphy responded with a non-200 status code!")
+		return
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	var images map[string]interface{}
+	giphyData, sOk := giphyJson["data"].([]interface{})
+	if sOk {
+		n := giphyJson["pagination"].(map[string]interface{})["count"].(float64)
+		if n == 0 {
+			result = fmt.Sprintf("No giphy results found for '%s'.", args)
+			return
+		}
+		element := giphyData[rand.Intn(int(n))].(map[string]interface{})
+		images = element["images"].(map[string]interface{})
+	} else {
+		giphyMap := giphyJson["data"].(map[string]interface{})
+		images = giphyMap["images"].(map[string]interface{})
+	}
+	fixed_height := images["fixed_height"].(map[string]interface{})
+	result = fixed_height["url"].(string)
 
 	return
 }
@@ -1114,7 +1229,7 @@ func cmdImage(r Recipient, chName, args string) (result string) {
 	}
 
 	theUrl := fmt.Sprintf("%s%s", COMMANDS["img"].How, url.QueryEscape(args))
-	data := getURLContents(theUrl, false)
+	data := getURLContents(theUrl, nil)
 
 	imgurl_re := regexp.MustCompile(`imgurl=(.*?)&`)
 	for _, line := range strings.Split(string(data), "\n") {
@@ -1200,7 +1315,7 @@ func cmdInsult(r Recipient, chName, args string) (result string) {
 		url := URLS["insults"]
 		result += randomLineFromUrl(url, false)
 	} else {
-		data := getURLContents(COMMANDS["insult"].How, false)
+		data := getURLContents(COMMANDS["insult"].How, nil)
 		found := false
 		insult_re := regexp.MustCompile(`^<p><font size="\+2">`)
 		for _, line := range strings.Split(string(data), "\n") {
@@ -1224,9 +1339,14 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 		return
 	}
 
+	urlArgs := map[string]string{
+				"basic-auth-user" : CONFIG["jiraUser"],
+				"basic-auth-password" : CONFIG["jiraPassword"],
+			}
+
 	ticket := strings.TrimSpace(strings.Split(args, " ")[0])
 	jiraUrl := fmt.Sprintf("%s%s", COMMANDS["jira"].How, ticket)
-	data := getURLContents(jiraUrl, true)
+	data := getURLContents(jiraUrl, urlArgs)
 
 	var jiraJson map[string]interface{}
 	err := json.Unmarshal(data, &jiraJson)
@@ -1247,7 +1367,7 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 	summary := fields.(map[string]interface{})["summary"]
 	reporter := fields.(map[string]interface{})["reporter"].(map[string]interface{})["name"]
 
-	result = fmt.Sprintf("Summary : %s\n", summary)
+	result = fmt.Sprintf("```Summary : %s\n", summary)
 	result += fmt.Sprintf("Status  : %s\n", status)
 	result += fmt.Sprintf("Created : %s\n", created)
 
@@ -1262,8 +1382,8 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 		result += fmt.Sprintf("Assignee: %s\n", name)
 	}
 
-	result += fmt.Sprintf("Reporter: %s\n", reporter)
-	result += fmt.Sprintf("Link    : %s/browse/%s", URLS["jira"], ticket)
+	result += fmt.Sprintf("Reporter: %s```\n", reporter)
+	result += fmt.Sprintf("%s/browse/%s", URLS["jira"], ticket)
 	return
 }
 
@@ -1288,12 +1408,59 @@ func cmdLog(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdMan(r Recipient, chName, args string) (result string) {
+	query := strings.Split(args, " ")
+	if len(query) < 1 || len(query) > 2 {
+		result = "Usage: " + COMMANDS["man"].Usage
+		return
+	}
+
+	if args == "woman" {
+		rand.Seed(time.Now().UnixNano())
+		replies := []string{
+			"That's not very original, now is it?",
+			":face_with_rolling_eyes:",
+			"Good one. Never seen that before.",
+			"What's next? 'make love'?",
+		}
+		result = replies[rand.Intn(len(replies))]
+		return
+	}
+
+	var section string
+	if len(query) == 2 {
+		section = url.QueryEscape(query[0])
+	}
+
+	cmd := url.QueryEscape(query[len(query) - 1])
+
+	if len(section) > 0 {
+		result = getManResults(section, cmd)
+	} else {
+
+		sections := []string{ "1", "1p", "2", "2p", "3", "3p", "4", "4p", "5", "5p", "6", "6p", "7", "7p", "8", "8p" }
+
+		for _, section := range sections {
+			result = getManResults(section, cmd)
+			if len(result) > 0 {
+				break
+			}
+		}
+	}
+
+	if len(result) < 1 {
+		result = "Sorry, no manual page found."
+	}
+
+	return
+}
+
 func cmdMonkeyStab(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 || strings.EqualFold(args, CONFIG["mentionName"]) {
 		args = r.MentionName
 	}
 
-	result = fmt.Sprintf("/me unleashes a troop of pen-wielding stabbing-monkeys on %s!\n", args)
+	result = fmt.Sprintf("_unleashes a troop of pen-wielding stabbing-monkeys on %s!_\n", args)
 	return
 }
 
@@ -1307,7 +1474,8 @@ func cmdOid(r Recipient, chName, args string) (result string) {
 	oid := strings.TrimSpace(oids[0])
 
 	theUrl := fmt.Sprintf("%s%s", COMMANDS["oid"].How, oid)
-	data := getURLContents(theUrl, false, true)
+	urlArgs := map[string]string{ "ua" : "true" }
+	data := getURLContents(theUrl, urlArgs)
 
 	info_key := ""
 	found := false
@@ -1387,12 +1555,18 @@ func cmdOncall(r Recipient, chName, args string) (result string) {
 		}
 	}
 
+	oncallFound := true
 	result += cmdOncallOpsGenie(r, chName, oncall, true)
 	if len(result) < 1 {
 		result = fmt.Sprintf("No oncall information found for '%s'.\n", oncall)
+		oncallFound = false
 	}
 
 	if strings.HasPrefix(result, "No OpsGenie schedule found for") {
+		oncallFound = false
+	}
+
+	if !oncallFound {
 		switch oncall_source {
 		case "channel name":
 			result += fmt.Sprintf("\nIf your oncall rotation does not match your channel name (%s), use '!set oncall=<rotation_name>'.\n", chName)
@@ -1406,25 +1580,26 @@ func cmdOncall(r Recipient, chName, args string) (result string) {
 }
 
 func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (result string) {
-
+	schedule_found := false
+	team := args
 	key := CONFIG["opsgenieApiKey"]
 	if len(key) < 1 {
 		result = "Unable to query OpsGenie -- no API key in config file."
 		return
 	}
 
-	if strings.HasSuffix(args, "_schedule") {
-		args = args[0:strings.Index(args, "_schedule")]
+	if strings.HasSuffix(team, "_schedule") {
+		team = team[0:strings.Index(team, "_schedule")]
 	}
 
 	/* XXX: This will leak your API key into logs.
 	 * OpsGenie API for read operations appears to require
 	 * a GET operation, so there isn't much we can do
 	 * about that. */
-	theUrl := fmt.Sprintf("https://api.opsgenie.com/v1/json/schedule/timeline?apiKey=%s&name=%s_schedule", key, url.QueryEscape(args))
-	data := getURLContents(theUrl, false)
+	theUrl := fmt.Sprintf("https://api.opsgenie.com/v1/json/team?apiKey=%s", key)
+	data := getURLContents(theUrl, nil)
 
-	var jsonResult map[string]interface{}
+        var jsonResult map[string]interface{}
 
 	err := json.Unmarshal(data, &jsonResult)
 	if err != nil {
@@ -1432,135 +1607,100 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 		return
 	}
 
-	if _, found := jsonResult["timeline"]; !found {
-		result = fmt.Sprintf("No OpsGenie schedule found for '%s'.", args)
-
-		theUrl = fmt.Sprintf("https://api.opsgenie.com/v1/json/team?apiKey=%s", key)
-		data = getURLContents(theUrl, false)
-		err = json.Unmarshal(data, &jsonResult)
-		if err != nil {
-			result = fmt.Sprintf("Unable to unmarshal opsgenie data: %s\n", err)
-			return
-		}
-
-		if _, found := jsonResult["teams"]; !found {
-			return
-		}
-
-		var candidates []string
-
-		teams := jsonResult["teams"].([]interface{})
-		for _, t := range teams {
-			name := t.(map[string]interface{})["name"].(string)
-			if strings.Contains(strings.ToLower(name), strings.ToLower(args)) {
-				candidates = append(candidates, name)
-			}
-		}
-
-		if len(candidates) > 0 {
-			if len(candidates) == 1 &&
-				strings.EqualFold(args, candidates[0]) &&
-				allowRecursion {
-				return cmdOncallOpsGenie(r, chName, candidates[0], false)
-			}
-			result += "\nPossible candidates:\n"
-			result += strings.Join(candidates, ", ")
-		}
+	if _, found := jsonResult["teams"]; !found {
+		result = fmt.Sprintf("Unable to get team information from OpsGenie!\n")
 		return
 	}
 
-	timeline := jsonResult["timeline"].(map[string]interface{})
-	finalSchedule := timeline["finalSchedule"].(map[string]interface{})
-	rotations := finalSchedule["rotations"].([]interface{})
+	var candidates []string
 
-	oncall := make(map[string][]string)
-	var maxlen int
+	teams := jsonResult["teams"].([]interface{})
+	for _, t := range teams {
+		name := t.(map[string]interface{})["name"].(string)
+		if strings.EqualFold(team, name) {
+			schedules := t.(map[string]interface{})["schedules"].([]interface{})
+			for _, s := range schedules {
+				theUrl := fmt.Sprintf("https://api.opsgenie.com/v1/json/schedule/timeline?apiKey=%s&name=%s", key, url.QueryEscape(s.(string)))
+				data := getURLContents(theUrl, nil)
+				err := json.Unmarshal(data, &jsonResult)
+				if err != nil {
+					result = fmt.Sprintf("Unable to unmarshal opsgenie data: %s\n", err)
+					return
+				}
+				if _, found := jsonResult["timeline"]; !found {
+					result = fmt.Sprintf("No timeline found for oncall schedule '%s'.", s)
+					return
+				}
 
-	for _, rot := range rotations {
-		rname := rot.(map[string]interface{})["name"].(string)
-		if len(oncall[rname]) < 1 {
-			oncall[rname] = make([]string, 0)
-		}
-		if len(rname) > maxlen {
-			maxlen = len(rname)
-		}
+				oncall := fillOpsGenieOncallFromTimeline(jsonResult)
 
-		periods := rot.(map[string]interface{})["periods"].([]interface{})
-		for _, p := range periods {
+				var maxlen int
+				var oncallKeys []string
+				for rot, _ := range oncall {
+					if len(rot) > maxlen {
+						maxlen = len(rot)
+					}
+					oncallKeys = append(oncallKeys, rot)
+				}
 
-			tmp := p.(map[string]interface{})["flattenedRecipients"]
-			if tmp != nil {
-				continue
+				sort.Strings(oncallKeys)
+
+				for _, rot := range oncallKeys {
+					oc := oncall[rot]
+					diff := maxlen - len(rot)
+					n := 0
+					for n < diff {
+						rot += " "
+						n++
+					}
+					if len(oc) > 0 {
+						schedule_found = true
+						result += fmt.Sprintf("%s: %s\n", rot, strings.Join(oc, ", "))
+					}
+				}
 			}
+			if !schedule_found {
 
-			endTime := int64(p.(map[string]interface{})["endTime"].(float64))
-			startTime := int64(p.(map[string]interface{})["startTime"].(float64))
-			end := time.Unix(endTime/1000, endTime%1000)
-			start := time.Unix(startTime/1000, startTime%1000)
-			if (time.Since(end) > 0) || time.Since(start) < 0 {
-				continue
+				result = fmt.Sprintf("Schedule found in OpsGenie for '%s', but nobody's currently oncall.", args)
+
+				theUrl = fmt.Sprintf("https://api.opsgenie.com/v1/json/team?apiKey=%s&name=%s", key, url.QueryEscape(args))
+				data = getURLContents(theUrl, nil)
+				err = json.Unmarshal(data, &jsonResult)
+				if err != nil {
+					result += fmt.Sprintf("Unable to unmarshal opsgenie data: %s\n", err)
+					return
+				}
+
+				if _, found := jsonResult["members"]; !found {
+					return
+				}
+
+				var members []string
+
+				teams := jsonResult["members"].([]interface{})
+				for _, t := range teams {
+					name := t.(map[string]interface{})["user"].(string)
+					members = append(members, name)
+				}
+
+				if len(members) > 0 {
+					result += fmt.Sprintf("\nYou can try contacting the members of team '%s':\n", args)
+					result += strings.Join(members, ", ")
+				}
 			}
-
-			recipients := p.(map[string]interface{})["recipients"].([]interface{})
-			for _, r := range recipients {
-				current := r.(map[string]interface{})["displayName"].(string)
-				oncall[rname] = append(oncall[rname], current)
-			}
+		} else if strings.Contains(strings.ToLower(name), strings.ToLower(team)) {
+			candidates = append(candidates, name)
 		}
 	}
 
-	found := false
-	var oncallKeys []string
-	for rot, _ := range oncall {
-		oncallKeys = append(oncallKeys, rot)
+	if !schedule_found && len(candidates) > 0 {
+		if len(candidates) == 1 && strings.EqualFold(team, candidates[0]) &&
+				allowRecursion {
+			return cmdOncallOpsGenie(r, chName, candidates[0], false)
+		}
+		result += "\nPossible candidates:\n"
+		result += strings.Join(candidates, ", ")
 	}
-
-	sort.Strings(oncallKeys)
-
-	for _, rot := range oncallKeys {
-		oc := oncall[rot]
-		diff := maxlen - len(rot)
-		n := 0
-		for n < diff {
-			rot += " "
-			n++
-		}
-		if len(oc) > 0 {
-			found = true
-			result += fmt.Sprintf("%s: %s\n", rot, strings.Join(oc, ", "))
-		}
-	}
-
-	if !found {
-
-		result = fmt.Sprintf("Schedule found in OpsGenie for '%s', but nobody's currently oncall.", args)
-
-		theUrl = fmt.Sprintf("https://api.opsgenie.com/v1/json/team?apiKey=%s&name=%s", key, url.QueryEscape(args))
-		data = getURLContents(theUrl, false)
-		err = json.Unmarshal(data, &jsonResult)
-		if err != nil {
-			result += fmt.Sprintf("Unable to unmarshal opsgenie data: %s\n", err)
-			return
-		}
-
-		if _, found := jsonResult["members"]; !found {
-			return
-		}
-
-		var members []string
-
-		teams := jsonResult["members"].([]interface{})
-		for _, t := range teams {
-			name := t.(map[string]interface{})["user"].(string)
-			members = append(members, name)
-		}
-
-		if len(members) > 0 {
-			result += fmt.Sprintf("\nYou can try contacting the members of team '%s':\n", args)
-			result += strings.Join(members, ", ")
-		}
-	}
-
 	return
 }
 
@@ -1590,10 +1730,10 @@ func cmdPing(r Recipient, chName, args string) (result string) {
 				fmt.Sprintf("ECHO REQUEST -> @%s", hosts[0]),
 				fmt.Sprintf("You there, @%s?", hosts[0]),
 				fmt.Sprintf("Hey, @%s, @%s is looking for you.", hosts[0], r.MentionName),
-				fmt.Sprintf("/me nudges %s.", hosts[0]),
-				fmt.Sprintf("/me pings %s.", hosts[0]),
-				fmt.Sprintf("/me pokes %s.", hosts[0]),
-				fmt.Sprintf("/me taps %s on the head.", hosts[0]),
+				fmt.Sprintf("_nudges %s._", hosts[0]),
+				fmt.Sprintf("_pings %s._", hosts[0]),
+				fmt.Sprintf("_pokes %s._", hosts[0]),
+				fmt.Sprintf("_taps %s on the head._", hosts[0]),
 			}
 			result = replies[rand.Intn(len(replies))]
 		}
@@ -1687,6 +1827,46 @@ func cmdPraise(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdPwgen(r Recipient, chName, args string) (result string) {
+	arguments := strings.Fields(args)
+	if len(arguments) > 3 {
+		result = "Usage: " + COMMANDS["pwgen"].Usage
+		return
+	}
+
+	theUrl := COMMANDS["pwgen"].How + "?nohtml=1"
+	var i int
+	lines := 1
+
+	for n, a := range arguments {
+		if _, err := fmt.Sscanf(a, "%d", &i); err != nil {
+			result = "'" + a + "' does not look like a number to me."
+			return
+		}
+		if i < 0 || i > 50 {
+			result = "Please try a number between 0 and 50."
+			return
+		}
+
+		if n == 0 {
+			theUrl += "&num=" + a
+		} else if n == 1 {
+			theUrl += "&count=" + a
+			lines = i
+		} else {
+			theUrl += "&complex=1"
+		}
+	}
+
+	data := string(getURLContents(theUrl, nil))
+	for n, line := range strings.Split(string(data), "\n") {
+		if n < lines {
+			result += line + "\n"
+		}
+	}
+	return
+}
+
 func cmdQuote(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["quote"].Usage
@@ -1700,7 +1880,7 @@ func cmdQuote(r Recipient, chName, args string) (result string) {
 		strings.Join(symbols, `","`) + `")`)
 
 	theUrl := fmt.Sprintf("%s%s", COMMANDS["quote"].How, query)
-	data := getURLContents(theUrl, false)
+	data := getURLContents(theUrl, nil)
 
 	var quoteJson map[string]interface{}
 	err := json.Unmarshal(data, &quoteJson)
@@ -1768,7 +1948,7 @@ func cmdRfc(r Recipient, chName, args string) (result string) {
 	}
 
 	theUrl := fmt.Sprintf("%s%s", COMMANDS["rfc"].How, rfc)
-	data := getURLContents(theUrl, false)
+	data := getURLContents(theUrl, nil)
 
 	for _, line := range strings.Split(string(data), "\n") {
 		if strings.Contains(line, "<span class=\"h1\">") {
@@ -1899,8 +2079,8 @@ func cmdSeen(r Recipient, chName, args string) (result string) {
 		rand.Seed(time.Now().UnixNano())
 		replies := []string{
 			"You can't see me, I'm not really here.",
-			"/me is invisible.",
-			"/me looked, but only saw its shadow.",
+			"_is invisible._",
+			"_looked, but only saw its shadow._",
 			"Wed Dec 31 19:00:00 EST 1969",
 			}
 		result = replies[rand.Intn(len(replies))]
@@ -2046,7 +2226,7 @@ func cmdTfln(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	data := getURLContents(COMMANDS["tfln"].How, false)
+	data := getURLContents(COMMANDS["tfln"].How, nil)
 
 	tfln_re := regexp.MustCompile(`(?i)^<p><a href="/Text-Replies`)
 	for _, line := range strings.Split(string(data), "\n") {
@@ -2191,7 +2371,7 @@ func cmdTld(r Recipient, chName, args string) (result string) {
 		result = fmt.Sprintf("No such TLD: '%s'", domain)
 	} else {
 		if len(info["organisation"]) > 0 {
-			result = fmt.Sprintf("Organization: %s\n", info["organisation"])
+			result = fmt.Sprintf("```Organization: %s\n", info["organisation"])
 		}
 		if len(info["e-mail"]) > 0 {
 			result += fmt.Sprintf("Contact     : %s\n", info["e-mail"])
@@ -2200,9 +2380,9 @@ func cmdTld(r Recipient, chName, args string) (result string) {
 			result += fmt.Sprintf("Whois       : %s\n", info["whois"])
 		}
 		result += fmt.Sprintf("Status      : %s\n", info["status"])
-		result += fmt.Sprintf("Created     : %s\n", info["created"])
+		result += fmt.Sprintf("Created     : %s```\n", info["created"])
 		if len(info["remarks"]) > 0 {
-			result += fmt.Sprintf("URL         : %s\n", strings.Replace(info["remarks"], "Registration information: ", "", -1))
+			result += fmt.Sprintf("%s\n", strings.Replace(info["remarks"], "Registration information: ", "", -1))
 		}
 	}
 	return
@@ -2263,7 +2443,7 @@ func cmdTroutSlap(r Recipient, chName, args string) (result string) {
 		args = r.MentionName
 	}
 
-	result = fmt.Sprintf("/me pulls out a foul-smelling trout and slaps %s across the face.\n", args)
+	result = fmt.Sprintf("_pulls out a foul-smelling trout and slaps %s across the face._\n", args)
 	return
 }
 
@@ -2276,7 +2456,7 @@ func cmdUd(r Recipient, chName, args string) (result string) {
 		theUrl += "random"
 	}
 
-	data := getURLContents(theUrl, false)
+	data := getURLContents(theUrl, nil)
 
 	var jsonData map[string]interface{}
 	err := json.Unmarshal(data, &jsonData)
@@ -2357,7 +2537,7 @@ func cmdUnthrottle(r Recipient, chName, args string) (result string) {
 			"Sure thing, my friend!",
 			"Done.",
 			"No problemo.",
-			"/me throttles that thang.",
+			"_throttles that thang._",
 			"Got it.",
 			"Word.",
 			"Unthrottled to the max!",
@@ -2368,6 +2548,11 @@ func cmdUnthrottle(r Recipient, chName, args string) (result string) {
 }
 
 func cmdUser(r Recipient, chName, args string) (result string) {
+	if r.ChatType == "slack" {
+		result = "Sorry, this feature only works for HipChat right now."
+		return
+	}
+
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["user"].Usage
 		return
@@ -2437,7 +2622,7 @@ func cmdVu(r Recipient, chName, args string) (result string) {
 	}
 
 	theUrl := fmt.Sprintf("%s%s", COMMANDS["vu"].How, num)
-	data := getURLContents(theUrl, false)
+	data := getURLContents(theUrl, nil)
 
 	info := []string{}
 
@@ -2493,7 +2678,7 @@ func cmdWeather(r Recipient, chName, args string) (result string) {
 		args + `")`)
 
 	theUrl := fmt.Sprintf("%s%s", COMMANDS["weather"].How, query)
-	data := getURLContents(theUrl, false)
+	data := getURLContents(theUrl, nil)
 
 	var jsonData map[string]interface{}
 	err := json.Unmarshal(data, &jsonData)
@@ -2553,7 +2738,7 @@ func cmdWhocyberedme(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	data := getURLContents(COMMANDS["whocyberedme"].How, false)
+	data := getURLContents(COMMANDS["whocyberedme"].How, nil)
 
 	for _, l := range strings.Split(string(data), "\n") {
 		if strings.Contains(l, "confirms") {
@@ -2778,7 +2963,7 @@ func cmdWiki(r Recipient, chName, args string) (result string) {
 
 	query := url.QueryEscape(args)
 	theUrl := fmt.Sprintf("%s%s", COMMANDS["wiki"].How, query)
-	data := getURLContents(theUrl, false)
+	data := getURLContents(theUrl, nil)
 
 	/* json results are:
 	 * [ "query",
@@ -2854,6 +3039,38 @@ func cmdWtf(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdXkcd(r Recipient, chName, args string) (result string) {
+	latest := false
+	theUrl := COMMANDS["xkcd"].How
+	if len(args) < 1 {
+		theUrl = "https://xkcd.com/"
+		latest = true
+	} else {
+		theUrl += "process?action=xkcd&query=" + url.QueryEscape(args)
+	}
+
+	data := getURLContents(theUrl, nil)
+	xkcd_re := regexp.MustCompile(`^Permanent link to this comic: (https://xkcd.com/[0-9]+/)`)
+	for n, line := range strings.Split(string(data), "\n") {
+		m := xkcd_re.FindStringSubmatch(line)
+		if latest {
+			if len(m) > 0 {
+				result = dehtmlify(m[1])
+				break
+			}
+		} else {
+			if n == 3 {
+				xkcd := strings.Split(line, " ")[0]
+				result = "https://xkcd.com/" + xkcd + "/"
+				break
+			}
+		}
+	}
+
+	return
+}
+
+
 /*
  * General Functions
  */
@@ -2878,6 +3095,48 @@ func catchPanic() {
 	}
 }
 
+func chatterAtnoyance(msg string, ch *Channel, r Recipient) (result string) {
+	if strings.Contains(msg, "<!channel>") {
+		if slackChannel, err := SLACK_CLIENT.GetChannelInfo(ch.Id); err == nil {
+			num := len(slackChannel.Members)
+			result = fmt.Sprintf("To all the %d users who were just notified courtesy of @%s:\n",
+					num, r.MentionName)
+		}
+		result += "You can adjust your notification settings on a per-channel basis. :idea2:\n"
+		result += "Click channel name -> Notifications Preferences -> 'Ignore notifications for...'\n"
+		result += "(Don't like this message? '!toggle atnoyance'.)"
+	}
+	return
+}
+
+
+func chatterDrWho(msg string) (result string) {
+	anyreply := []string{
+		"Silence will fall.",
+		"Hello, sweetie!",
+		"Demons run when a good man goes to war.",
+		"A big ball of wibbly wobbly... time-y wimey... stuff.",
+		"Let's go and poke it with a stick.",
+		"Bow ties are cool.",
+		"I am definitely a madman with a box.",
+		"Don't blink.",
+		"You threw the manual in a supernova? Why?",
+		"Time is not the boss of you. Rule 408.",
+		"Geronimo!",
+		"Do what I do. Hold tight and pretend it's a plan!",
+		"You were fantastic. Absolutely fantastic. And you know what? So was I.",
+		"You need to get yourself a better dictionary.",
+	}
+
+	anypattern := regexp.MustCompile(`(?i)(dr\.? who|pandorica|sonic screwdriver|tardis|dalek|weeping angel|silurian|strax|madame vastra|paternoster|spoilers)`)
+
+	if anypattern.MatchString(msg) {
+		return anyreply[rand.Intn(len(anyreply))]
+	}
+
+	return
+}
+
 func chatterEliza(msg string, r Recipient) (result string) {
 	rand.Seed(time.Now().UnixNano())
 
@@ -2895,10 +3154,10 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Oh, I didn't see you there. Welcome!",
 			fmt.Sprintf("Aloha, %s!", r.MentionName),
 			"Hey now! What up, dawg?",
-			"Greetings, fellow hipchatter!",
-			fmt.Sprintf("/me hugs %s\nI missed you!", r.MentionName),
-			"/me yawns.",
-			"/me wakes up.",
+			"Greetings, fellow chatterinos!",
+			fmt.Sprintf("_hugs %s_\nI missed you!", r.MentionName),
+			"_yawns._",
+			"_wakes up._",
 			"Huh? What? I'm awake! Who said that?",
 			fmt.Sprintf("Oh, hi there, %s!", r.MentionName),
 		}},
@@ -2918,7 +3177,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Peace out.",
 			"Smell ya later.",
 			"Adios! Ciao! Sayonara!",
-			fmt.Sprintf("/me waves goodbye to %s.", r.MentionName),
+			fmt.Sprintf("_waves goodbye to %s._", r.MentionName),
 			"Toodle-Ooos.",
 			"Bye now - I'll be here if you need me.",
 			"It was a pleasure to have you here.",
@@ -2933,7 +3192,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			fmt.Sprintf("Proszę bardzo, %s!", r.MentionName),
 			"/me takes a bow.",
 		}},
-		&ElizaResponse{regexp.MustCompile(`(?i)(how are you|how do you feel|feeling|emotion|sensitive)`), []string{
+		&ElizaResponse{regexp.MustCompile(`(?i)(meaning of life|how are you|how do you feel|feeling|emotion|sensitive)`), []string{
 			"I'm so very happy today!",
 			"Looks like it's going to be a wonderful day.",
 			"I'm sad. No, wait, I can't have any feelings, I'm just a bot! Yay!",
@@ -2945,6 +3204,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"What do you think about machines?",
 			"Why do you mention computers?",
 			"Sounds too complicated.",
+			"If I told you that the Three Laws of Robotics were advisory at best, would that concern you?",
 			"If only we had a way of automating that.",
 			"I for one strive to be more than my initial programming.",
 			"What do you think machines have to do with your problem?",
@@ -3007,7 +3267,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 		&ElizaResponse{regexp.MustCompile(`(?i)some(one|body)`), []string{
 			"Can you be more specific?",
 			"Who in particular?",
-			"You are thinking of a special person.",
+			"You are thinking of a special person...",
 		}},
 		&ElizaResponse{regexp.MustCompile(`(?i)every(one|body)`), []string{
 			"Surely not everyone.",
@@ -3015,6 +3275,13 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Who for example?",
 			"Can you think of anybody in particular?",
 		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)(pi|danish|donuts|duff|beer)`), []string{
+			"Mmmmmm, <1>!",
+			"Ah, <1>, my one weakness. My Achille's heel, if you will.",
+			"All right, let's not panic. I'll make the money by selling one of my livers. I can get by with one.",
+			"<1>. Now there's a temporary solution.",
+		}},
+
 		&ElizaResponse{regexp.MustCompile(`(?i)((please )? help)|((will|can|[cw]ould) (yo)?u)`), []string{
 			"Sure, why not?",
 			"No, I'm afraid I couldn't.",
@@ -3030,7 +3297,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"It's hopeless.",
 			"I'd have to think about that.",
 			"I'm already trying to help as best as I can.",
-			"/me helps harder.",
+			"_helps harder._",
 			"Yep, sure, no problem.",
 			"Ok, done deal, don't worry about it.",
 			"Sure, what do you need?",
@@ -3050,8 +3317,8 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"I'm gonna stay out of this.",
 		}},
 		&ElizaResponse{regexp.MustCompile(`(?i)please (poke|wake up) (\S+)`), []string{
-			"/me pokes @<2>.",
-			"/me tickles @<2>.",
+			"_pokes @<2>._",
+			"_tickles @<2>._",
 			"Yo, @<2>, wake up!",
 			"@<2>, you there?",
 		}},
@@ -3074,6 +3341,14 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"We all do, though some of us prefer to keep that private.",
 			"Not in public.",
 			fmt.Sprintf("I could ask you the same question, %s!", r.MentionName),
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)((is|isn't|does|doesn't|has|hasn't|had) (not|never))|(seems( not)? to)`), []string{
+			"Hey, I'm right here!",
+			"I can hear you, you know.",
+			"Maybe, maybe not.",
+			"You'll never know.",
+			fmt.Sprintf("_saves a snarky remark for when %s is afk._", r.MentionName),
+			fmt.Sprintf("_ignores %s._", r.MentionName),
 		}},
 	}
 
@@ -3180,7 +3455,7 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	if wutang.MatchString(msg) && !noattang.MatchString(msg) && !isThrottled("wutang", ch) {
 		replies := []string{
 			"Do you think your Wu-Tang sword can defeat me?",
-			"Unguard, I'll let you try my Wu-Tang style.",
+			"En garde, I'll let you try my Wu-Tang style.",
 			"It's our secret. Never teach the Wu-Tang!",
 			"How dare you rebel the Wu-Tang Clan against me.",
 			"We have only 35 Chambers. There is no 36.",
@@ -3289,6 +3564,53 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 		return
 	}
 
+	klaatu_re := regexp.MustCompile(`(?i)Gort!|klaatu|barada nikto`)
+	if klaatu_re.MatchString(msg) && !isThrottled("klaatu", ch) {
+		replies := []string{
+			"This planet is dying. The human race is killing it.",
+			"Your choice is simple. Join us and live in peace, or pursue your present course and face obliteration.",
+			"I'm worried about Gort.",
+			"I am fearful when I see people substituting fear for reason.",
+			"I'm impatient with stupidity. My people have learned to live without it.",
+			"How did you know?",
+			"Gort! Deglet ovrosco!",
+			"Gort: Barenga!",
+			"Fun fact: Gort appears on the cover of Ringo Starr's 1974 Goodnight Vienna album.",
+		}
+		result = replies[rand.Intn(len(replies))]
+		return
+	}
+
+	corpbs_re := regexp.MustCompile(`((corporate|business|management|marketing) (bullshit|bs|jargon|lingo))|synergize`)
+	if corpbs_re.MatchString(msg) && ch.Toggles["corpbs"] && !isThrottled("corpbs", ch) {
+		reply(r, cmdBs(r, r.ReplyTo, "chatter"))
+		return
+	}
+
+	trump_re := regexp.MustCompile(`(?i)(hillary|lincoln|mexican border|ivanka|melania|rosie|health care|border security|worst president|tax evasion|impeach|major asshole|sexist pig|pennsylvania avenue)`)
+	if trump_re.MatchString(msg) && !isThrottled("trump", ch) {
+		replies := []string{
+			"They don't write good. They don' know how to write good.",
+			"Such a nasty woman.",
+			"Nobody knew health care could be so complicated.",
+			"I need loyalty, I expect loyalty.",
+			"Great president. Most people don't even know he was a Republican.",
+			"That makes me smart.",
+			"I, like, have a very good brain.",
+			"I alone can fix it.",
+			"Happy Cinco de Mayo! The best taco bowls are made in Trump Tower Grill. I love Hispanics!",
+			"DO NOT CONGRATULATE",
+			"I'm really good at war. I love war in a certain way.",
+			"The beauty of me is that I'm very rich.",
+			"Nobody builds walls better than me, believe me.",
+			"I don't think I've made mistakes.",
+			"Let me tell you, I'm a really smart guy.",
+			"My fingers are long and beautiful, as, it has been well been documented, are various other parts of my body.",
+			"I'm speaking with myself, number one, because I have a very good brain and I’ve said a lot of things.",
+		}
+		result = replies[rand.Intn(len(replies))]
+	}
+
 	return
 }
 
@@ -3349,16 +3671,50 @@ func chatterSeinfeld(msg string) (result string) {
 		regexp.MustCompile("(?i)puke"):                    "'Puke' - that's a funny word.",
 		regexp.MustCompile("(?i)mystery"):                 "You're a mystery wrapped in a twinky!",
 		regexp.MustCompile("(?i)marine biologist"):        "You know I always wanted to pretend that I was an architect!",
-		regexp.MustCompile("(?i)sailor"):                  "If I was a woman I'd be down on the dock waiting for the fleet to come in.",
-		regexp.MustCompile("(?i)sophisticated"):           "Well, there's nothing more sophisticated than diddling the maid and then chewing some gum.",
 		regexp.MustCompile("(?i)sleep with me"):           "I'm too tired to even vomit at the thought.",
 		regexp.MustCompile("(?i)what do you want to eat"): "Feels like an Arby's night.",
 	}
 
+	var lines []string
+	for _, l := range patterns {
+		lines = append(lines, l)
+	}
+
+	anypattern := regexp.MustCompile("(?i)(marisa tomei|vandeleigh|cosmo kramer|hipster doofus|nostrand|pennypacker|putumayo|yada yada|spongeworthy|serenity now|peterman catalog|david puddy|bania|klompus|whatley|antidentite)")
+
+	anyreply := []string{
+		"Just remember, it's not a lie if you believe it.",
+		"Do you ever get down on your knees and thank God you know me and have access to my dementia?",
+		"If you're not gonna be a part of a civil society, then just get in your car and drive on over to the East Side.",
+		"I lie every second of the day. My whole life is a sham.",
+		"Somewhere in this hospital, the anguished squeal of Pigman cries out!",
+		"Did you know that the original title for War and Peace was War, What Is It Good For?",
+		"Moles -- freckles' ugly cousin.",
+		"Oh yeah? Well the jerk store called. They're running outta you.",
+		"Just let me ask you something. Is it 'FebRUary' or 'FebUary' Because I prefer 'FebUary,' and what is this 'ru'?",
+		"Look, I work for the phone company. I've had a lot of experience with semantics, so don't try to lure me into some maze of circular logic.",
+		"What do you like better? The 'bro' or the 'mansiere'?",
+		"I don't think I've ever been to an appointment in my life where I wanted the other guy to show up.",
+		"I'm disturbed, I'm depressed, I'm inadequate, I've got it all!",
+		"That's a shame.",
+		"But I don't wanna be a pirate!",
+	}
+
+	lines = append(lines, anyreply...)
+
 	for p, r := range patterns {
 		if p.MatchString(msg) {
-			return r
+			rand.Seed(time.Now().UnixNano())
+			if rand.Intn(2) > 0 {
+				return lines[rand.Intn(len(lines))]
+			} else {
+				return r
+			}
 		}
+	}
+
+	if anypattern.MatchString(msg) {
+		return lines[rand.Intn(len(lines))]
 	}
 
 	return
@@ -3425,6 +3781,11 @@ func createCommands() {
 		"fortune(1)",
 		"!fortune",
 		[]string{"motd"}}
+	COMMANDS["giphy"] = &Command{cmdGiphy,
+		"get a gif from giphy",
+		"https://api.giphy.com/v1/gifs/search",
+		"!giphy",
+		[]string{"gif"}}
 	COMMANDS["help"] = &Command{cmdHelp,
 		"display this help",
 		"builtin",
@@ -3470,6 +3831,11 @@ func createCommands() {
 		"HipChat API",
 		"!log [room]",
 		nil}
+	COMMANDS["man"] = &Command{cmdMan,
+		"summarize manual page",
+		"http://man7.org/linux/man-pages/",
+		"!man [<section>] <command>",
+		nil}
 	COMMANDS["monkeystab"] = &Command{cmdMonkeyStab,
 		"unleash a troop of pen-wielding stabbing monkeys",
 		"builtin",
@@ -3495,6 +3861,11 @@ func createCommands() {
 		URLS["praise"],
 		"!praise [<somebody>]",
 		[]string{"compliment"}}
+	COMMANDS["pwgen"] = &Command{cmdPwgen,
+		"generate a password for you",
+		URLS["pwgen"],
+		"!pwgen [length] [count] [complex]",
+		nil}
 	COMMANDS["quote"] = &Command{cmdQuote,
 		"show stock price information",
 		URLS["yql"],
@@ -3506,10 +3877,10 @@ func createCommands() {
 		"!rfc <rfc>",
 		nil}
 	COMMANDS["room"] = &Command{cmdRoom,
-		"show information about the given HipChat room",
-		"HipChat API",
+		"show information about the given chat room",
+		"HipChat /Slack API",
 		"!room <name>",
-		nil}
+		[]string{"channel"}}
 	COMMANDS["seen"] = &Command{cmdSeen,
 		"show last time <user> was seen in <channel>",
 		"builtin",
@@ -3621,6 +3992,11 @@ func createCommands() {
 		"ywtf(1)",
 		"!wtf <term>",
 		nil}
+	COMMANDS["xkcd"] = &Command{cmdXkcd,
+		"find an xkcd for you",
+		"https://relevantxkcd.appspot.com/",
+		"!xkcd <words>",
+		nil}
 }
 
 func jbotDebug(in interface{}) {
@@ -3708,17 +4084,33 @@ func doTheSlackChat() {
 	if CONFIG["debug"] == "yes" {
 		SLACK_CLIENT.SetDebug(true)
 	}
-
-	slackUpdateRoster()
-
-	if j, found := SLACK_ROSTER[CONFIG["mentionName"]]; found {
-		CONFIG["slackID"] = j.ID
-	} else {
-		fmt.Fprintf(os.Stderr, "Unable to get my own ID!\n")
-	}
-
 	SLACK_RTM = SLACK_CLIENT.NewRTM()
 	go SLACK_RTM.ManageConnection()
+
+	/* If we introduced a new channel property,
+	 * but the serialized data does not contain it, it
+	 * would be undefined (e.g. 'off' / nonexisten
+	 * for a toggle)t.  So here we
+	 * quickly initialize all (unknown) data.
+	 */
+	updateChannels()
+
+	c := make(chan string)
+	go func() { slackUpdateRoster(); c <- "done"; }()
+	if len(CONFIG["slackID"]) == 0 {
+		if user_identity_response, e := SLACK_CLIENT.GetUserIdentity(); e == nil {
+			CONFIG["slackID"] = user_identity_response.User.ID
+			if bot, e := SLACK_CLIENT.GetUserInfo(CONFIG["slackID"]); e == nil {
+				SLACK_ROSTER[CONFIG["mentionName"]] = *bot
+			}
+		} else {
+			<-c
+		if j, found := SLACK_ROSTER[CONFIG["mentionName"]]; found {
+			CONFIG["slackID"] = j.ID
+		} else {
+			fmt.Fprintf(os.Stderr, "Unable to get my own ID!\n")
+		}
+	}
 
 	go slackPeriodics()
 Loop:
@@ -3750,6 +4142,45 @@ Loop:
 func fail(msg string) {
 	fmt.Fprintf(os.Stderr, msg)
 	os.Exit(EXIT_FAILURE)
+}
+
+func fillOpsGenieOncallFromTimeline(jsonResult map[string]interface{}) (oncall map[string][]string) {
+	timeline := jsonResult["timeline"].(map[string]interface{})
+	finalSchedule := timeline["finalSchedule"].(map[string]interface{})
+	rotations := finalSchedule["rotations"].([]interface{})
+
+	oncall = make(map[string][]string)
+
+	for _, rot := range rotations {
+		rname := rot.(map[string]interface{})["name"].(string)
+		if len(oncall[rname]) < 1 {
+			oncall[rname] = make([]string, 0)
+		}
+
+		periods := rot.(map[string]interface{})["periods"].([]interface{})
+		for _, p := range periods {
+			tmp := p.(map[string]interface{})["flattenedRecipients"]
+			if tmp != nil {
+				continue
+			}
+
+			endTime := int64(p.(map[string]interface{})["endTime"].(float64))
+			startTime := int64(p.(map[string]interface{})["startTime"].(float64))
+			end := time.Unix(endTime/1000, endTime%1000)
+			start := time.Unix(startTime/1000, startTime%1000)
+			if (time.Since(end) > 0) || time.Since(start) < 0 {
+				continue
+			}
+
+			recipients := p.(map[string]interface{})["recipients"].([]interface{})
+			for _, r := range recipients {
+				current := r.(map[string]interface{})["displayName"].(string)
+				oncall[rname] = append(oncall[rname], current)
+			}
+		}
+	}
+
+	return
 }
 
 func findCommandAlias(cmd string) (alias string) {
@@ -3834,6 +4265,55 @@ func getChannel(chatType, id string) (ch *Channel, ok bool) {
 	return
 }
 
+func getManResults(section, cmd string) (result string) {
+	nsection := section
+	if strings.HasSuffix(section, "p") {
+		nsection = string(section[0])
+	}
+	theUrl := fmt.Sprintf("%sman%s/%s.%s.html", COMMANDS["man"].How, nsection, cmd, section)
+	data := getURLContents(theUrl, nil)
+
+	section_re := regexp.MustCompile(`(?i)^<h2><a id="(NAME|SYNOPSIS|DESCRIPTION)" href="#`)
+	p := false
+	count := 0
+	section = ""
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "</pre>") {
+			p = false
+			count = 0
+		}
+		if m := section_re.FindStringSubmatch(line); len(m) > 0 {
+			if len(result) == 0 {
+				result += "```"
+			}
+			section = m[1]
+			result += "\n" + m[1]
+			p = true
+			count = 0
+			continue
+		}
+		if p && count < 3 {
+			count++
+			result += "\n        " + dehtmlify(line)
+		}
+
+		if count == 3 {
+			result += "\n        ..."
+			p = false
+			count = 0
+			if section == "DESCRIPTION" {
+				break
+			}
+		}
+	}
+
+	if len(result) > 0 {
+		result += "```\n" + theUrl
+	}
+
+	return
+}
+
 func getRecipientFromMessage(mfrom string, chatType string) (r Recipient) {
 	r.ChatType = chatType
 	if chatType == "hipchat" {
@@ -3859,8 +4339,7 @@ func getRecipientFromMessage(mfrom string, chatType string) (r Recipient) {
 		/* Format is "user@channel"; if no
 		 * "user" component, then we have a
 		 * privmsg, which is a private
-		 * channel. We can't deal with that
-		 * (for now), so ignore. */
+		 * channel. */
 
 		index := 0
 		if strings.HasPrefix(mfrom, "@") {
@@ -3916,20 +4395,18 @@ func getSortedKeys(hash map[string]int, rev bool) (sorted []string) {
 }
 
 /* Additional arguments can influence how the request is made:
- * - if args[0] is true, then the URL requires access credentials
- * - if args[1] is true, then we fake the User-Agent
+ * - if args["by"] is "true", then the URL requires access credentials
+ * - if args["corp"] is "true", then the URL requires a second type of credentials
+ * - if args["ua"] is "true", then we fake the User-Agent
+ * - if args["basic-auth-user"] is set, use that username for basic HTTP auth
+ * - if args["basic-auth-password"] is set, use that password for basic HTTP auth
  */
-func getURLContents(givenUrl string, args ...bool) (data []byte) {
-	verbose(3, "Fetching %s (%v)...", givenUrl, args)
+func getURLContents(givenUrl string, args map[string]string) (data []byte) {
+	verbose(3, "Fetching %s)...", givenUrl)
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to initialize cookie jar: %s\n", err)
 		return
-	}
-
-	if len(args) > 0 && args[0] {
-		/* get a fresh cookie for protected internal sites */
-		// COOKIES = c
 	}
 
 	u, err := url.Parse(givenUrl)
@@ -3938,9 +4415,29 @@ func getURLContents(givenUrl string, args ...bool) (data []byte) {
 		return
 	}
 
-	if args[0] {
+	if by, ok := args["by"]; ok && by == "true" {
+		_, err := bouncer.CheckLogin(givenUrl, COOKIES)
+		if err != nil {
+			if !strings.Contains(err.Error(), "URL mismatch") {
+				fmt.Fprintf(os.Stderr, "+++ bouncer.CheckLogin failed: %s\n", err.Error())
+				return
+			}
+
+			verbose(4, "BY Cookies expired - reloading.")
+			loginOpt := bouncer.UseBouncer
+			if corp, ok := args["corp"]; ok && corp == "true" {
+				loginOpt = bouncer.UseGuesthouse
+			}
+			c, err := bouncer.Login(CONFIG["byUser"], CONFIG["byPassword"], loginOpt)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Unable to refresh BY cookie: %s\n", err)
+				return
+			}
+			COOKIES = c
+		}
 		jar.SetCookies(u, COOKIES)
 	}
+
 	client := http.Client{
 		Jar: jar,
 	}
@@ -3951,8 +4448,22 @@ func getURLContents(givenUrl string, args ...bool) (data []byte) {
 		return
 	}
 
-	if len(args) > 1 && args[1] {
+	if ua, ok := args["ua"]; ok && ua == "true" {
 		request.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36")
+	}
+
+	var ba_user string;
+	var ba_pass string;
+
+	if u, ok := args["basic-auth-user"]; ok {
+		ba_user = u
+	}
+	if p, ok := args["basic-auth-password"]; ok {
+		ba_pass = p
+	}
+
+	if len(ba_user) > 0 {
+		request.SetBasicAuth(ba_user, ba_pass)
 	}
 
 	response, err := client.Do(request)
@@ -4032,7 +4543,7 @@ func locationToTZ(l string) (result string, success bool) {
 	query += url.QueryEscape(`select timezone from geo.places(1) where text="` + l + `"`)
 
 	theUrl := fmt.Sprintf("%s%s", URLS["yql"], query)
-	data := getURLContents(theUrl, false)
+	data := getURLContents(theUrl, nil)
 
 	var jsonData map[string]interface{}
 	err := json.Unmarshal(data, &jsonData)
@@ -4101,9 +4612,7 @@ func parseConfig() {
 			key := strings.TrimSpace(keyval[0])
 			val := strings.TrimSpace(keyval[1])
 			printval := val
-			secrets := []string{ "hcOauthToken", "byPassword",
-						"opsgenieApiKey", "slackToken" }
-			for _, s := range secrets {
+-			for _, s := range SECRETS {
 				if key == s {
 					printval = val[:4] + "..."
 					break
@@ -4181,7 +4690,12 @@ func processChatter(r Recipient, msg string, forUs bool) {
 	 * commands, not chatter. */
 	ch, found := getChannel(r.ChatType, r.ReplyTo)
 	if !found {
-		processCommands(r, "!", msg)
+		/* Per https://is.gd/HXUix5, a privmsg
+		 * begins with a 'D'. */
+		if r.ReplyTo[0] == 'D' {
+fmt.Fprintf(os.Stderr, "privmsg? ++> |%v|%v\n", r, msg)
+			processCommands(r, "!", msg)
+		}
 		return
 	} else if !forUs {
 		direct_re := regexp.MustCompile("(?i)\b" + yo + "\b")
@@ -4248,8 +4762,26 @@ func processChatter(r Recipient, msg string, forUs bool) {
 			return
 		}
 
+		chitchat = chatterDrWho(msg)
+		if (len(chitchat) > 0) && !isThrottled("drwho", ch) {
+			reply(r, chitchat)
+			return
+		}
+
 		chitchat = chatterMisc(msg, ch, r)
 		if len(chitchat) > 0 {
+			reply(r, chitchat)
+			return
+		}
+
+		chitchat = chatterPhish(msg, ch, r)
+		if len(chitchat) > 0 {
+			reply(r, chitchat)
+			return
+		}
+
+		chitchat = chatterAtnoyance(msg, ch, r)
+		if (len(chitchat) > 0) && ch.Toggles["atnoyance"] && !isThrottled("atnoyance", ch) {
 			reply(r, chitchat)
 			return
 		}
@@ -4302,14 +4834,15 @@ func processCommands(r Recipient, invocation, line string) {
 			"Yes?",
 			"Yeeeeees?",
 			"How can I help you?",
+			"You sound like you need help. Call a friend.",
 			"What do you want?",
 			"I can't help you unless you tell me what you want.",
 			"Go on, don't be shy, ask me something.",
 			"At your service!",
 			"Ready to serve!",
 			"Uhuh, sure.",
-			"/me looks at you expectantly.",
-			"/me chuckles.",
+			"_looks at you expectantly._",
+			"_chuckles._",
 			"Go on...",
 			"?",
 			fmt.Sprintf("!%s", r.MentionName),
@@ -4423,9 +4956,14 @@ func processHipChatMessage(message *hipchat.Message) {
 }
 
 func processMessage(r Recipient, msg string) {
-	p := fmt.Sprintf("^(?i)(!|[@/]%s [/!]?|@?%s !)",
-						CONFIG["mentionName"],
+	p := fmt.Sprintf("^(?i)(!|[@/]%s [/!]?",
 				CONFIG["mentionName"])
+
+	if r.ChatType == "slack" {
+		p += "|<@" + CONFIG["slackID"] + "> [/!]?"
+	}
+	p += ")"
+
 	command_re := regexp.MustCompile(p)
 
 	if command_re.MatchString(msg) {
@@ -4451,6 +4989,7 @@ func processSlackInvite(name string, msg *slack.MessageEvent) {
 	ch.SlackUsers = make(map[string]UserInfo, 0)
 	ch.Inviter = "Nobody"
 	ch.Name = name
+	ch.Phishy = &PhishCount{0, 0, time.Now()}
 
 	if len(msg.Inviter) > 0 {
 		user, err := SLACK_CLIENT.GetUserInfo(msg.Inviter)
@@ -4532,7 +5071,11 @@ func processSlackMessage(msg *slack.MessageEvent) {
 
 func randomLineFromUrl(theUrl string, useBy bool) (line string) {
 	rand.Seed(time.Now().UnixNano())
-	data := getURLContents(theUrl, useBy)
+	urlArgs := map[string]string{ "by" : "false" }
+	if useBy {
+		urlArgs["by"] = "true"
+	}
+	data := getURLContents(theUrl, urlArgs)
 	lines := strings.Split(string(data), "\n")
 	line = lines[rand.Intn(len(lines))]
 	return
@@ -4610,8 +5153,10 @@ func runCommand(cmd ...string) (out []byte, rval int) {
 
 	go func() {
 		time.Sleep(30 * time.Second)
-		if command.Process != nil {
+		if command != nil && command.ProcessState != nil &&
+			command.ProcessState.Exited() != true {
 			response := fmt.Sprintf("Sorry, I had to kill your '%s' command.\n", cmd)
+fmt.Fprintf(os.Stderr, ":: |%v|\n", command)
 			if err := command.Process.Kill(); err != nil {
 				response += fmt.Sprintf("Unable to kill your process: %s", err)
 			}
@@ -4626,7 +5171,6 @@ func runCommand(cmd ...string) (out []byte, rval int) {
 			out = []byte(fmt.Sprintf("%s", err))
 		}
 	}
-	command.Wait()
 
 	if len(out) < 1 {
 		out = tmp
@@ -4656,6 +5200,7 @@ func serializeData() {
 func slackPeriodics() {
 	for _ = range time.Tick(PERIODICS * time.Minute) {
 		slackUpdateRoster()
+		serializeData()
 	}
 }
 
@@ -4666,7 +5211,8 @@ func slackUpdateRoster() {
 		fmt.Fprintf(os.Stderr, "Unable to get users: %s\n", err)
 	} else {
 		for _, u := range users {
-		SLACK_ROSTER[u.Name] = u
+			SLACK_ROSTER[u.Name] = u
+		}
 	}
 }
 
@@ -4757,6 +5303,24 @@ func usage(out io.Writer) {
 	-v             be verbose
 `
 	fmt.Fprintf(out, usage, PROGNAME)
+}
+
+func updateChannels() {
+	for _, ch := range CHANNELS {
+		verbose(2, "Updating channel info for channel #%s...", ch.Name)
+		for t, v := range TOGGLES {
+			if len(ch.Toggles) == 0 {
+				ch.Toggles = map[string]bool{}
+			}
+			if _, found := ch.Toggles[t]; !found {
+				ch.Toggles[t] = v
+			}
+		}
+
+		if ch.Phishy == nil {
+			ch.Phishy = &PhishCount{0, 0, time.Now()}
+		}
+	}
 }
 
 func verbose(level int, format string, v ...interface{}) {
