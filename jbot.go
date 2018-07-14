@@ -119,8 +119,8 @@ var HIPCHAT_ROSTER = map[string]*hipchat.User{}
 
 var SLACK_CLIENT *slack.Client
 var SLACK_RTM *slack.RTM
-var SLACK_ROSTER = map[string]slack.User{}
 
+var SLACK_CHANNELS = map[string]slack.Channel{}
 var CHANNELS = map[string]*Channel{}
 var CURSES = map[string]int{}
 var COMMANDS = map[string]*Command{}
@@ -528,7 +528,7 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 			"productivate",
 			"productize",
 			"promote",
-			"provide accessto",
+			"provide access to",
 			"pursue",
 			"re-engineer",
 			"recaptiualize",
@@ -1185,7 +1185,7 @@ func cmdHelp(r Recipient, chName, args string) (result string) {
 					COMMANDS[cmd].Usage,
 					COMMANDS[cmd].Help)
 			} else {
-				result = fmt.Sprintf("No such command: %s.", cmd)
+				result = fmt.Sprintf("No such command: %s. Try '!help'.", cmd)
 			}
 		}
 	}
@@ -1248,12 +1248,20 @@ func cmdImage(r Recipient, chName, args string) (result string) {
 func cmdInfo(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		args = r.ReplyTo
-	} else {
-		args = strings.ToLower(args)
 	}
 
+	slack_channel_re := regexp.MustCompile(`(?i)<(#[A-Z0-9]+)\|([^>]+)>`)
+	m := slack_channel_re.FindStringSubmatch(args)
+	if len(m) > 0 {
+		result = getChannelInfo(m[1])
+		args = m[2]
+	} else {
+		result = getChannelInfo(args)
+	}
+
+	args = strings.ToLower(args)
 	if ch, found := getChannel(r.ChatType, args); found {
-		result = fmt.Sprintf("I was invited into #%s by %s.\n", ch.Name, ch.Inviter)
+		result += fmt.Sprintf("I was invited into #%s by %s.\n", ch.Name, ch.Inviter)
 		result += fmt.Sprintf("These are the users I've seen in #%s:\n", ch.Name)
 
 		var names []string
@@ -1292,7 +1300,7 @@ func cmdInfo(r Recipient, chName, args string) (result string) {
 			result += settings
 		}
 	} else {
-		result = "I have no info on #" + args
+		result += "I'm not currently in #" + args
 	}
 	return
 }
@@ -1343,7 +1351,6 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 				"basic-auth-user" : CONFIG["jiraUser"],
 				"basic-auth-password" : CONFIG["jiraPassword"],
 			}
-
 	ticket := strings.TrimSpace(strings.Split(args, " ")[0])
 	jiraUrl := fmt.Sprintf("%s%s", COMMANDS["jira"].How, ticket)
 	data := getURLContents(jiraUrl, urlArgs)
@@ -1356,6 +1363,11 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 	}
 
 	if _, found := jiraJson["fields"]; !found {
+		if errmsg, found := jiraJson["errorMessages"]; found {
+			result = fmt.Sprintf("Unable to fetch data for %s: %s",
+						ticket, errmsg.([]interface{})[0].(string))
+			return
+		}
 		fmt.Fprintf(os.Stderr, "+++ jira fail for %s: %v\n", ticket, jiraJson)
 		result = fmt.Sprintf("No data found for ticket %s", ticket)
 		return
@@ -1454,6 +1466,7 @@ func cmdMan(r Recipient, chName, args string) (result string) {
 
 	return
 }
+
 
 func cmdMonkeyStab(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 || strings.EqualFold(args, CONFIG["mentionName"]) {
@@ -1827,6 +1840,7 @@ func cmdPraise(r Recipient, chName, args string) (result string) {
 	return
 }
 
+
 func cmdPwgen(r Recipient, chName, args string) (result string) {
 	arguments := strings.Fields(args)
 	if len(arguments) > 3 {
@@ -1866,6 +1880,7 @@ func cmdPwgen(r Recipient, chName, args string) (result string) {
 	}
 	return
 }
+
 
 func cmdQuote(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
@@ -3023,9 +3038,45 @@ func cmdWtf(r Recipient, chName, args string) (result string) {
 		term = terms[1]
 	}
 
+	// Slack expands '#channel' to e.g. '<#CBEAWGAPJ|channel>'
+	slack_channel_re := regexp.MustCompile(`(?i)<(#[A-Z0-9]+)\|([^>]+)>`)
+	m := slack_channel_re.FindStringSubmatch(term)
+	if len(m) > 0 {
+		result = getChannelInfo(m[1])
+		if len(result) > 0 {
+			return
+		} else {
+			term = m[2]
+		}
+	}
+
+	// Slack expands '@user' to e.g. '<@CBEAWGAPJ>'
+	slack_user_re := regexp.MustCompile(`(?i)<@([A-Z0-9]+)>`)
+	m = slack_user_re.FindStringSubmatch(term)
+	if len(m) > 0 {
+		u, err := SLACK_CLIENT.GetUserInfo(m[1])
+		if err == nil {
+			result = cmdBy(r, "", u.Name)
+			if len(result) > 0 {
+				if strings.HasPrefix(result, "No such user") {
+					term = u.Name
+				} else {
+					return
+				}
+			}
+		} else {
+fmt.Fprintf(os.Stderr, "%v\n", err)
+		}
+	}
+
 	if term == CONFIG["mentionName"] {
 		result = fmt.Sprintf("Unfortunately, no one can be told what %s is...\n", CONFIG["mentionName"])
 		result += "You have to see it for yourself."
+		return
+	}
+
+	if term == "pi" {
+		result = fmt.Sprintf("%.64v", math.Pi)
 		return
 	}
 
@@ -3095,6 +3146,7 @@ func catchPanic() {
 	}
 }
 
+
 func chatterAtnoyance(msg string, ch *Channel, r Recipient) (result string) {
 	if strings.Contains(msg, "<!channel>") {
 		if slackChannel, err := SLACK_CLIENT.GetChannelInfo(ch.Id); err == nil {
@@ -3155,7 +3207,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			fmt.Sprintf("Aloha, %s!", r.MentionName),
 			"Hey now! What up, dawg?",
 			"Greetings, fellow chatterinos!",
-			fmt.Sprintf("_hugs %s_\nI missed you!", r.MentionName),
+			fmt.Sprintf("_hugs %s._\nI missed you!", r.MentionName),
 			"_yawns._",
 			"_wakes up._",
 			"Huh? What? I'm awake! Who said that?",
@@ -3190,7 +3242,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			fmt.Sprintf("De rien, %s!", r.MentionName),
 			fmt.Sprintf("Пожалуйста, %s!", r.MentionName),
 			fmt.Sprintf("Proszę bardzo, %s!", r.MentionName),
-			"/me takes a bow.",
+			"_takes a bow._",
 		}},
 		&ElizaResponse{regexp.MustCompile(`(?i)(meaning of life|how are you|how do you feel|feeling|emotion|sensitive)`), []string{
 			"I'm so very happy today!",
@@ -3199,7 +3251,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Life... don't talk to me about life.",
 			"Life... loathe it or ignore it, you can't like it.",
 		}},
-		&ElizaResponse{regexp.MustCompile(`(?i)( (ro)?bot|siri|alexa|machine|computer)`), []string{
+		&ElizaResponse{regexp.MustCompile(`(?i)( (ro)?bot|bender|skynet|terminator|siri|alexa|machine|computer)`), []string{
 			"Do computers worry you?",
 			"What do you think about machines?",
 			"Why do you mention computers?",
@@ -3275,7 +3327,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Who for example?",
 			"Can you think of anybody in particular?",
 		}},
-		&ElizaResponse{regexp.MustCompile(`(?i)(pi|danish|donuts|duff|beer)`), []string{
+		&ElizaResponse{regexp.MustCompile(`(?i)(\bpie?\b|danish|donuts|duff|beer)`), []string{
 			"Mmmmmm, <1>!",
 			"Ah, <1>, my one weakness. My Achille's heel, if you will.",
 			"All right, let's not panic. I'll make the money by selling one of my livers. I can get by with one.",
@@ -3365,8 +3417,14 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			return r
 		}
 	}
-
-	result = randomLineFromUrl(URLS["eliza"], false)
+	n := rand.Intn(10)
+	if n == 1 {
+		result = randomLineFromUrl(URLS["insults"], false)
+	} else if n < 4 {
+		result = randomLineFromUrl(URLS["praise"], false)
+	} else {
+		result = randomLineFromUrl(URLS["eliza"], false)
+	}
 	return
 }
 
@@ -3590,7 +3648,7 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	trump_re := regexp.MustCompile(`(?i)(hillary|lincoln|mexican border|ivanka|melania|rosie|health care|border security|worst president|tax evasion|impeach|major asshole|sexist pig|pennsylvania avenue)`)
 	if trump_re.MatchString(msg) && !isThrottled("trump", ch) {
 		replies := []string{
-			"They don't write good. They don' know how to write good.",
+			"They don't write good. They don't know how to write good.",
 			"Such a nasty woman.",
 			"Nobody knew health care could be so complicated.",
 			"I need loyalty, I expect loyalty.",
@@ -3606,9 +3664,14 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 			"I don't think I've made mistakes.",
 			"Let me tell you, I'm a really smart guy.",
 			"My fingers are long and beautiful, as, it has been well been documented, are various other parts of my body.",
-			"I'm speaking with myself, number one, because I have a very good brain and I’ve said a lot of things.",
+-			"I'm speaking with myself, number one, because I have a very good brain and I've said a lot of things.",
 		}
 		result = replies[rand.Intn(len(replies))]
+	}
+
+	fnord_re := regexp.MustCompile(`(?i)fnord`)
+	if fnord_re.MatchString(msg) && !isThrottled("fnord", ch) {
+		result = "IF YOU DON'T SEE THE FNORD IT CAN'T EAT YOU"
 	}
 
 	return
@@ -3878,7 +3941,7 @@ func createCommands() {
 		nil}
 	COMMANDS["room"] = &Command{cmdRoom,
 		"show information about the given chat room",
-		"HipChat /Slack API",
+		"HipChat / Slack API",
 		"!room <name>",
 		[]string{"channel"}}
 	COMMANDS["seen"] = &Command{cmdSeen,
@@ -4084,6 +4147,7 @@ func doTheSlackChat() {
 	if CONFIG["debug"] == "yes" {
 		SLACK_CLIENT.SetDebug(true)
 	}
+
 	SLACK_RTM = SLACK_CLIENT.NewRTM()
 	go SLACK_RTM.ManageConnection()
 
@@ -4094,23 +4158,7 @@ func doTheSlackChat() {
 	 * quickly initialize all (unknown) data.
 	 */
 	updateChannels()
-
-	c := make(chan string)
-	go func() { slackUpdateRoster(); c <- "done"; }()
-	if len(CONFIG["slackID"]) == 0 {
-		if user_identity_response, e := SLACK_CLIENT.GetUserIdentity(); e == nil {
-			CONFIG["slackID"] = user_identity_response.User.ID
-			if bot, e := SLACK_CLIENT.GetUserInfo(CONFIG["slackID"]); e == nil {
-				SLACK_ROSTER[CONFIG["mentionName"]] = *bot
-			}
-		} else {
-			<-c
-		if j, found := SLACK_ROSTER[CONFIG["mentionName"]]; found {
-			CONFIG["slackID"] = j.ID
-		} else {
-			fmt.Fprintf(os.Stderr, "Unable to get my own ID!\n")
-		}
-	}
+	go updateSlackChannels()
 
 	go slackPeriodics()
 Loop:
@@ -4242,6 +4290,29 @@ func getopts() {
 	}
 }
 
+func getAllMembersInChannel(id string) (allMembers []string) {
+        params := slack.GetUsersInConversationParameters{
+                ChannelID: id,
+		Limit: 1000,
+        }
+
+	for {
+		members, cursor, err := SLACK_CLIENT.GetUsersInConversation(&params)
+		if err != nil {
+			fmt.Printf("Unable to get conversation: %s\n", err)
+			break
+		}
+		allMembers = append(allMembers, members...)
+		if len(cursor) > 0 {
+			params.Cursor = cursor
+		} else {
+			break
+		}
+	}
+
+	return
+}
+
 func getChannel(chatType, id string) (ch *Channel, ok bool) {
 	ok = false
 
@@ -4264,6 +4335,36 @@ func getChannel(chatType, id string) (ch *Channel, ok bool) {
 
 	return
 }
+
+func getChannelInfo(id string) (info string) {
+	var ch slack.Channel
+fmt.Fprintf(os.Stderr, "%v\n", id)
+	found := false
+	if strings.HasPrefix(id, "#") {
+		id = id[1:]
+		ch, found = SLACK_CHANNELS[id]
+	}
+
+fmt.Fprintf(os.Stderr, "%v\n", id)
+	if !found {
+		c, err := SLACK_CLIENT.GetChannelInfo(id)
+		if err != nil {
+			return
+		}
+		ch = *c
+	}
+
+	topic := ""
+	if len(ch.Topic.Value) > 0 {
+		topic = fmt.Sprintf(" -- \"%s\"", ch.Topic.Value)
+	}
+	members := getAllMembersInChannel(id)
+	info = fmt.Sprintf("%s (%d members)%s\n%s\n",
+				ch.Name, len(members),
+				topic, ch.Purpose.Value)
+	return
+}
+
 
 func getManResults(section, cmd string) (result string) {
 	nsection := section
@@ -4313,6 +4414,7 @@ func getManResults(section, cmd string) (result string) {
 
 	return
 }
+
 
 func getRecipientFromMessage(mfrom string, chatType string) (r Recipient) {
 	r.ChatType = chatType
@@ -4612,7 +4714,7 @@ func parseConfig() {
 			key := strings.TrimSpace(keyval[0])
 			val := strings.TrimSpace(keyval[1])
 			printval := val
--			for _, s := range SECRETS {
+			for _, s := range SECRETS {
 				if key == s {
 					printval = val[:4] + "..."
 					break
@@ -4868,6 +4970,11 @@ func processCommands(r Recipient, invocation, line string) {
 			cmd = alias
 			commandFound = true
 		} else if strings.HasPrefix(invocation, "!") {
+			/* people get excited and say e.g. '!!' or '!!!'; ignore that */
+			rex := regexp.MustCompile(`^!+$`)
+			if rex.MatchString(cmd) {
+				return
+			}
 			response = cmdHelp(r, r.ReplyTo, cmd)
 		} else if channelFound {
 			processChatter(r, line, true)
@@ -5142,9 +5249,11 @@ func runCommand(cmd ...string) (out []byte, rval int) {
 	}
 
 	if len(cmd) == 1 {
-		argv = strings.Split(cmd[0], " ")
+		argv = strings.Split(dehtmlify(cmd[0]), " ")
 	} else {
-		argv = cmd
+		for _, word := range cmd {
+			argv = append(argv, dehtmlify(word))
+		}
 	}
 	command := exec.Command(argv[0], argv[1:]...)
 
@@ -5199,20 +5308,8 @@ func serializeData() {
 
 func slackPeriodics() {
 	for _ = range time.Tick(PERIODICS * time.Minute) {
-		slackUpdateRoster()
 		serializeData()
-	}
-}
-
-func slackUpdateRoster() {
-	verbose(1, "Updating Slack roster...")
-	users, err := SLACK_CLIENT.GetUsers()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to get users: %s\n", err)
-	} else {
-		for _, u := range users {
-			SLACK_ROSTER[u.Name] = u
-		}
+		updateSlackChannels()
 	}
 }
 
@@ -5221,6 +5318,30 @@ func updateHipChatRooms(rooms []*hipchat.Room) {
 		HIPCHAT_ROOMS[room.Id] = room
 	}
 }
+
+func updateSlackChannels() {
+        params := slack.GetConversationsParameters{
+		Limit: 1000,
+        }
+
+	for {
+		channels, cursor, err := SLACK_CLIENT.GetConversations(&params)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Unable to get conversations: %s\n", err)
+			break
+		}
+		for _, c := range channels {
+			SLACK_CHANNELS[c.Name] = c
+		}
+		if len(cursor) > 0 {
+			params.Cursor = cursor
+		} else {
+			break
+		}
+	}
+}
+
+
 
 func updateRoster(users []*hipchat.User) {
 	for _, user := range users {
