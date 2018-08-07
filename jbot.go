@@ -122,8 +122,12 @@ var SLACK_RTM *slack.RTM
 
 var SLACK_CHANNELS = map[string]slack.Channel{}
 var CHANNELS = map[string]*Channel{}
-var CURSES = map[string]int{}
 var COMMANDS = map[string]*Command{}
+var COUNTERS = map[string]map[string]int{
+			"commands" : map[string]int{},
+			"curses"   : map[string]int{},
+			"replies"  : map[string]int{},
+		}
 
 var TOGGLES = map[string]bool{
 	"atnoyance":   true,
@@ -922,15 +926,9 @@ func cmdCowsay(r Recipient, chName, args string) (result string) {
 
 func cmdCurses(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
-		sortedKeys := getSortedKeys(CURSES, true)
-		var curses []string
-		for _, k := range sortedKeys {
-			curses = append(curses, fmt.Sprintf("%s (%d)", k, CURSES[k]))
-		}
-		if len(curses) < 1 {
+		result = cmdTop(r, chName, "curses")
+		if len(result) < 1 {
 			result = "I have not seen any curses yet!"
-		} else {
-			result = strings.Join(curses, ", ")
 		}
 	} else {
 		allUsers := map[string]int{}
@@ -1278,7 +1276,7 @@ func cmdInfo(r Recipient, chName, args string) (result string) {
 		sort.Strings(names)
 		result += strings.Join(names, ", ")
 
-		stfu := cmdStfu(r, chName, "")
+		stfu := cmdStfu(r, ch.Name, "")
 		if len(stfu) > 0 {
 			result += fmt.Sprintf("\nTop 10 channel chatterers for #%s:\n", ch.Name)
 			result += fmt.Sprintf("%s", stfu)
@@ -1587,7 +1585,6 @@ func cmdOncall(r Recipient, chName, args string) (result string) {
 			result += fmt.Sprintf("\nIs your 'oncall' channel setting (%s) correct?\n", oncall)
 			result += "If not, use '!set oncall=<rotation_name>' to fix that.\n"
 		}
-
 	}
 	return
 }
@@ -1774,6 +1771,7 @@ func cmdPraise(r Recipient, chName, args string) (result string) {
 
 	if len(args) < 1 {
 		heroes := make(map[int][]string)
+
 		if r.ChatType == "hipchat" {
 			for u := range ch.HipChatUsers {
 				if ch.HipChatUsers[u].Praise > 0 {
@@ -2086,8 +2084,14 @@ func cmdSeen(r Recipient, chName, args string) (result string) {
 	ch, found := getChannel(r.ChatType, r.ReplyTo)
 
 	if len(wanted) > 1 {
-		verbose(4, "Looking for %s in %s'...", user, wanted[1])
-		ch, found = getChannel(r.ChatType, wanted[1])
+		chName = wanted[1]
+		slack_channel_re := regexp.MustCompile(`(?i)<(#[A-Z0-9]+)\|([^>]+)>`)
+		m := slack_channel_re.FindStringSubmatch(wanted[1])
+		if len(m) > 0 {
+			chName = m[2]
+		}
+		verbose(4, "Looking for %s in %s'...", user, chName)
+		ch, found = getChannel(r.ChatType, chName)
 	}
 
 	if strings.EqualFold(args, CONFIG["mentionName"]) {
@@ -2116,8 +2120,15 @@ func cmdSeen(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	for u, info := range ch.HipChatUsers {
-		if u.MentionName == user {
+
+	if r.ChatType == "hipchat" {
+		for u, info := range ch.HipChatUsers {
+			if u.MentionName == user {
+				result = info.Seen
+			}
+		}
+	} else if r.ChatType == "slack" {
+		if info, found := ch.SlackUsers[user]; found {
 			result = info.Seen
 		}
 	}
@@ -2168,6 +2179,67 @@ func cmdSet(r Recipient, chName, args string) (result string) {
 	ch.Settings[name] = value
 
 	result = fmt.Sprintf("Set '%s' to '%s'%s.", name, value, old)
+	return
+}
+
+func cmdSms(r Recipient, chName, args string) (result string) {
+	lookupType := "number"
+	shortcode := args
+	if len(args) < 1 {
+		shortcode = "773786" // Yahoo! Shortcode
+	}
+
+	shortcode = strings.Replace(shortcode, "-", "", -1)
+
+	var i int
+	if _, err := fmt.Sscanf(shortcode, "%d", &i); err != nil {
+		lookupType = "search"
+	}
+
+	var theUrl string
+	if lookupType == "number" {
+		theUrl = fmt.Sprintf("%sshort-code-%s/", COMMANDS["sms"].How, shortcode)
+	} else if lookupType == "search" {
+		theUrl = fmt.Sprintf("%s?fwp_short_code_search=%s/", COMMANDS["sms"].How, url.QueryEscape(shortcode))
+	}
+	data := getURLContents(theUrl, nil)
+
+	printNext := false
+	info := []string{
+			"Business/Organization:",
+			"Short Code Activation Date:",
+			"Short Code Deactivation Date:",
+			"Campaign Name:",
+		}
+	for _, line := range strings.Split(string(data), "\n") {
+		if lookupType == "number" {
+			if printNext {
+				result += dehtmlify(line) + "\n"
+					printNext = false
+			}
+			for _, field := range info {
+				if strings.Contains(line, fmt.Sprintf("<td>%s</td>", field)) {
+					result += field + " "
+						printNext = true
+						break
+				}
+			}
+		} else if lookupType == "search" {
+			re := regexp.MustCompile(`(?i)<h3><a href="(https://usshortcodedirectory.com/directory/short-code-([0-9]+)/)">(.*)</a></h3>`)
+			if m := re.FindStringSubmatch(line); len(m) > 0 {
+				result += m[3] + ": " + m[2]
+				result += "\n" + m[1] + "\n"
+			}
+		}
+	}
+
+	if len(result) > 0 && lookupType == "number" {
+		result = "Short Code: " + shortcode + "\n" + result
+	}
+
+	if len(result) < 1 {
+		result = "No results found for '" + args + "'."
+	}
 	return
 }
 
@@ -2440,6 +2512,46 @@ func cmdToggle(r Recipient, chName, args string) (result string) {
 			}
 		}
 	}
+	return
+}
+
+func cmdTop(r Recipient, chName, args string) (result string) {
+	unknown := true
+
+	if len(args) > 1 {
+		if counter, ok := COUNTERS[args]; ok {
+			unknown = false
+			nums := getSortedKeys(counter, true)
+			n := 1
+			counts := []string{}
+			for _, k := range nums {
+				counts = append(counts, fmt.Sprintf("%s (%d)", k, counter[k]))
+				n++
+				if n > 10 {
+					break
+				}
+			}
+			sep := ", "
+			if args == "replies" {
+				sep = "\n"
+			}
+			result += strings.Join(counts, sep)
+		} else {
+			result = "I don't keep track of that.\n"
+		}
+	}
+
+	if unknown || (len(args) < 1) {
+		result += "These are the things I currently track:\n"
+		var counters []string
+		for c := range COUNTERS {
+			counters = append(counters, c)
+		}
+		sort.Strings(counters)
+		result += strings.Join(counters, ", ")
+		return
+	}
+
 	return
 }
 
@@ -3333,7 +3445,6 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"All right, let's not panic. I'll make the money by selling one of my livers. I can get by with one.",
 			"<1>. Now there's a temporary solution.",
 		}},
-
 		&ElizaResponse{regexp.MustCompile(`(?i)((please )? help)|((will|can|[cw]ould) (yo)?u)`), []string{
 			"Sure, why not?",
 			"No, I'm afraid I couldn't.",
@@ -3417,6 +3528,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			return r
 		}
 	}
+
 	n := rand.Intn(10)
 	if n == 1 {
 		result = randomLineFromUrl(URLS["insults"], false)
@@ -3664,7 +3776,7 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 			"I don't think I've made mistakes.",
 			"Let me tell you, I'm a really smart guy.",
 			"My fingers are long and beautiful, as, it has been well been documented, are various other parts of my body.",
--			"I'm speaking with myself, number one, because I have a very good brain and I've said a lot of things.",
+			"I'm speaking with myself, number one, because I have a very good brain and I've said a lot of things.",
 		}
 		result = replies[rand.Intn(len(replies))]
 	}
@@ -3673,7 +3785,6 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	if fnord_re.MatchString(msg) && !isThrottled("fnord", ch) {
 		result = "IF YOU DON'T SEE THE FNORD IT CAN'T EAT YOU"
 	}
-
 	return
 }
 
@@ -3734,6 +3845,7 @@ func chatterSeinfeld(msg string) (result string) {
 		regexp.MustCompile("(?i)puke"):                    "'Puke' - that's a funny word.",
 		regexp.MustCompile("(?i)mystery"):                 "You're a mystery wrapped in a twinky!",
 		regexp.MustCompile("(?i)marine biologist"):        "You know I always wanted to pretend that I was an architect!",
+		regexp.MustCompile("(?i)sailor"):                  "If I was a woman I'd be down on the dock waiting for the fleet to come in.",
 		regexp.MustCompile("(?i)sleep with me"):           "I'm too tired to even vomit at the thought.",
 		regexp.MustCompile("(?i)what do you want to eat"): "Feels like an Arby's night.",
 	}
@@ -3955,6 +4067,11 @@ func createCommands() {
 		"!set -- show all current settings\n" +
 			"!set name=value -- set 'name' to 'value'\n",
 		[]string{"setting"}}
+	COMMANDS["sms"] = &Command{cmdSms,
+		"show short code information",
+		"https://usshortcodedirectory.com/directory/",
+		"!sms <numbers>",
+		nil}
 	COMMANDS["speb"] = &Command{cmdSpeb,
 		"show a security problem excuse bingo result",
 		/* http://crypto.com/bingo/pr */
@@ -3993,6 +4110,11 @@ func createCommands() {
 		"toggle a feature",
 		"builtin",
 		"!toggle [<feature>]",
+		nil}
+	COMMANDS["top"] = &Command{cmdTop,
+		"display top 10 stats of <counter>",
+		"builtin",
+		"!top <counter>",
 		nil}
 	COMMANDS["trivia"] = &Command{cmdTrivia,
 		"show a random piece of trivia",
@@ -4158,8 +4280,8 @@ func doTheSlackChat() {
 	 * quickly initialize all (unknown) data.
 	 */
 	updateChannels()
-	go updateSlackChannels()
 
+	go updateSlackChannels()
 	go slackPeriodics()
 Loop:
 	for {
@@ -4317,7 +4439,8 @@ func getChannel(chatType, id string) (ch *Channel, ok bool) {
 	ok = false
 
 	if chatType == "slack" {
-		slackChannel, err := SLACK_CLIENT.GetChannelInfo(id)
+		uId := strings.ToUpper(id)
+		slackChannel, err := SLACK_CLIENT.GetChannelInfo(uId)
 		if err == nil {
 			id = slackChannel.Name
 		} else {
@@ -4325,7 +4448,7 @@ func getChannel(chatType, id string) (ch *Channel, ok bool) {
 			 * channel, which Slack calls
 			 * a 'Group'.  Let's try that:
 			 */
-			if group, err := SLACK_CLIENT.GetGroupInfo(id); err == nil {
+			if group, err := SLACK_CLIENT.GetGroupInfo(uId); err == nil {
 				id = group.Name
 			}
 		}
@@ -4338,14 +4461,12 @@ func getChannel(chatType, id string) (ch *Channel, ok bool) {
 
 func getChannelInfo(id string) (info string) {
 	var ch slack.Channel
-fmt.Fprintf(os.Stderr, "%v\n", id)
 	found := false
 	if strings.HasPrefix(id, "#") {
 		id = id[1:]
 		ch, found = SLACK_CHANNELS[id]
 	}
 
-fmt.Fprintf(os.Stderr, "%v\n", id)
 	if !found {
 		c, err := SLACK_CLIENT.GetChannelInfo(id)
 		if err != nil {
@@ -4447,7 +4568,6 @@ func getRecipientFromMessage(mfrom string, chatType string) (r Recipient) {
 		if strings.HasPrefix(mfrom, "@") {
 			index = 1
 		}
-
 		from := strings.Split(mfrom, "@")
 		r.Id = strings.Trim(from[index], "@")
 		r.ReplyTo = from[1]
@@ -4583,6 +4703,19 @@ func getURLContents(givenUrl string, args map[string]string) (data []byte) {
 	}
 
 	return
+}
+
+func incrementCounter(category, counter string) {
+	if categoryCounters, ok := COUNTERS[category]; ok {
+		if ccount, ok := categoryCounters[counter]; ok {
+			categoryCounters[counter] = ccount + 1
+		} else {
+			categoryCounters[counter] = 1
+		}
+		COUNTERS[category] = categoryCounters
+	} else {
+		COUNTERS[category] = map[string]int{ counter : 1 }
+	}
 }
 
 func isThrottled(throttle string, ch *Channel) (is_throttled bool) {
@@ -4795,7 +4928,6 @@ func processChatter(r Recipient, msg string, forUs bool) {
 		/* Per https://is.gd/HXUix5, a privmsg
 		 * begins with a 'D'. */
 		if r.ReplyTo[0] == 'D' {
-fmt.Fprintf(os.Stderr, "privmsg? ++> |%v|%v\n", r, msg)
 			processCommands(r, "!", msg)
 		}
 		return
@@ -4914,24 +5046,7 @@ func processCommands(r Recipient, invocation, line string) {
 
 	args := strings.Fields(line)
 	if len(args) < 1 {
-		return
-	}
-
-	verbose(2, "%s #%s: '%s'", r.ChatType, who, line)
-
-	var cmd string
-	if strings.EqualFold(args[0], CONFIG["mentionName"]) {
-		args = args[1:]
-	}
-
-	if len(args) > 0 {
-		cmd = strings.ToLower(args[0])
-		args = args[1:]
-	}
-
-	jbotDebug(fmt.Sprintf("|%s| |%s|", cmd, args))
-
-	if len(cmd) < 1 {
+		rand.Seed(time.Now().UnixNano())
 		replies := []string{
 			"Yes?",
 			"Yeeeeees?",
@@ -4953,6 +5068,20 @@ func processCommands(r Recipient, invocation, line string) {
 		return
 	}
 
+	verbose(2, "%s #%s: '%s'", r.ChatType, who, line)
+
+	var cmd string
+	if strings.EqualFold(args[0], CONFIG["mentionName"]) {
+		args = args[1:]
+	}
+
+	if len(args) > 0 {
+		cmd = strings.ToLower(args[0])
+		args = args[1:]
+	}
+
+	jbotDebug(fmt.Sprintf("|%s| |%s|", cmd, args))
+
 	/* '!leave' does not have a callback, so needs
 	 * to be processed first. */
 	leave_re := regexp.MustCompile(`(please )?leave(,? please)?`)
@@ -4965,13 +5094,29 @@ func processCommands(r Recipient, invocation, line string) {
 	_, commandFound := COMMANDS[cmd]
 
 	if !commandFound {
+		cm_re := regexp.MustCompile(`(?i)^cmr?([0-9]+)$`)
+		inc_re := regexp.MustCompile(`(?i)^inc([0-9]+)$`)
+		jira_re := regexp.MustCompile(`(?i)^([a-z]+-[0-9]+)$`)
+
 		alias := findCommandAlias(cmd)
 		if len(alias) > 1 {
 			cmd = alias
 			commandFound = true
+		} else if m := cm_re.FindStringSubmatch(cmd); len(m) > 0 {
+			cmd = "cm"
+			args = []string{m[1]}
+			commandFound = true
+		} else if m := jira_re.FindStringSubmatch(cmd); len(m) > 0 {
+			cmd = "jira"
+			args = []string{m[1]}
+			commandFound = true
+		} else if m := inc_re.FindStringSubmatch(cmd); len(m) > 0 {
+			cmd = "sn"
+			args = []string{m[1]}
+			commandFound = true
 		} else if strings.HasPrefix(invocation, "!") {
 			/* people get excited and say e.g. '!!' or '!!!'; ignore that */
-			rex := regexp.MustCompile(`^!+$`)
+			rex := regexp.MustCompile(`^[[:punct:]]+$`)
 			if rex.MatchString(cmd) {
 				return
 			}
@@ -4983,6 +5128,7 @@ func processCommands(r Recipient, invocation, line string) {
 	}
 
 	if commandFound {
+		incrementCounter("commands", cmd)
 		if COMMANDS[cmd].Call != nil {
 			chName := r.ReplyTo
 			if ch, found := getChannel(r.ChatType, r.ReplyTo); found {
@@ -5209,6 +5355,7 @@ func readSavedData() {
 }
 
 func reply(r Recipient, msg string) {
+	incrementCounter("replies", msg)
 	if r.ChatType == "hipchat" {
 		if _, found := CHANNELS[r.ReplyTo]; found {
 			HIPCHAT_CLIENT.Say(r.Id, CONFIG["fullName"], msg)
@@ -5370,7 +5517,7 @@ func updateSeen(r Recipient, msg string) {
 		uInfo.Id = r.Id
 
 		for _, curse := range curses_match {
-			CURSES[curse] = CURSES[curse] + 1
+			incrementCounter("curses", curse)
 		}
 
 		count := len(strings.Split(msg, "\n"))
@@ -5412,8 +5559,11 @@ func updateSeen(r Recipient, msg string) {
 			}
 			ch.SlackUsers[r.MentionName] = uInfo
 		}
+
+		CHANNELS[ch.Id] = ch
 	}
 }
+
 
 func usage(out io.Writer) {
 	usage := `Usage: %v [-DVhv] [-c configFile]
