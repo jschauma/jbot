@@ -1304,9 +1304,11 @@ func cmdInfo(r Recipient, chName, args string) (result string) {
 }
 
 func cmdInsult(r Recipient, chName, args string) (result string) {
+	at_mention := "<@" + CONFIG["slackID"] + ">"
 	if (len(args) > 0) &&
 		((strings.ToLower(args) == strings.ToLower(CONFIG["mentionName"])) ||
 		 (strings.ToLower(args) == "@" + strings.ToLower(CONFIG["mentionName"])) ||
+		 (strings.ToLower(args) == strings.ToLower(at_mention)) ||
 			(args == "yourself") ||
 			(args == "me")) {
 		result = fmt.Sprintf("@%s: ", r.MentionName)
@@ -1715,6 +1717,7 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 }
 
 func cmdPing(r Recipient, chName, args string) (result string) {
+	ping := "ping"
 	hosts := strings.Fields(args)
 	if len(hosts) > 1 {
 		result = "Usage: " + COMMANDS["ping"].Usage
@@ -1750,7 +1753,18 @@ func cmdPing(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	_, err := runCommand(fmt.Sprintf("ping -q -w 1 -W 0.5 -i 0.5 -c 1 %s", host))
+	/* Alright, alright, we're being lazy here,
+	 * but treating anything with a ':' as an IPv6
+	 * address is actually good enough. */
+	if strings.Contains(host, ":") {
+		ping = "ping6"
+		/* Yahoo only. :-/ */
+		result = "Sorry, I'm running on an IPv4 only system."
+		result += "\nI know, I know, that's quite silly, but it is what it is."
+		return
+	}
+
+	_, err := runCommand(fmt.Sprintf("%s -q -w 1 -W 0.5 -i 0.5 -c 1 %s", ping, host))
 	if err > 0 {
 		result = fmt.Sprintf("Unable to ping %s.", hosts[0])
 	} else {
@@ -1771,7 +1785,6 @@ func cmdPraise(r Recipient, chName, args string) (result string) {
 
 	if len(args) < 1 {
 		heroes := make(map[int][]string)
-
 		if r.ChatType == "hipchat" {
 			for u := range ch.HipChatUsers {
 				if ch.HipChatUsers[u].Praise > 0 {
@@ -2119,7 +2132,6 @@ func cmdSeen(r Recipient, chName, args string) (result string) {
 		result = fmt.Sprintf("Usage: %s", COMMANDS["seen"].Usage)
 		return
 	}
-
 
 	if r.ChatType == "hipchat" {
 		for u, info := range ch.HipChatUsers {
@@ -3729,8 +3741,22 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 
 	ed := regexp.MustCompile(`(?i)(editor war)|(emacs.*vi)|(vi.*emacs)|((best|text) (text[ -]?)?editor)`)
 	if ed.MatchString(msg) && !isThrottled("ed", ch) {
-		result = "Ed is the standard text editor."
-		result += "\nEd, man! !man ed"
+		replies := []string{
+			"Emacs is like a laser guided missile. It only has to be slightly mis-configured to ruin your whole day.",
+			"I've been using Vim for about 2 years now, mostly because I can't figure out how to exit it.",
+			"http://www.viemu.com/vi-vim-cheat-sheet.gif",
+			"https://imgs.xkcd.com/comics/real_programmers.png",
+			"https://i.imgur.com/RxlwP.png",
+			"Emacs is a great OS, but it lacks a decent text editor.",
+			"Did you know that 'Emacs' stands for 'Emacs Means A Crappy Screen'?",
+			"Did you know that 'Emacs' stands for 'Emacs May Allow Customized Screwups'?",
+			"Emacs is a hideous monstrosity, but a functional one. On the other hand, vi is a masterpiece of elegance. Sort of like a Swiss Army knife versus a rapier.",
+			"Vi has two modes. The one in which it beeps and the one in which it doesn't.",
+			"HELO. My $name is sendmail.cf. Prepare to vi.",
+			"I've seen visual editors like that, but I don't feel a need for them. I don't want to see the state of the file when I'm editing.",
+			"Ed is the standard text editor.\nEd, man! !man ed",
+		}
+		result = replies[rand.Intn(len(replies))]
 		return
 	}
 
@@ -3785,6 +3811,23 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	if fnord_re.MatchString(msg) && !isThrottled("fnord", ch) {
 		result = "IF YOU DON'T SEE THE FNORD IT CAN'T EAT YOU"
 	}
+
+	sudo_re := regexp.MustCompile(`(?i)sudo (\S+)`)
+	m = sudo_re.FindStringSubmatch(msg)
+	if len(m) > 0 && !isThrottled("sudo", ch) {
+		replies := []string {
+			fmt.Sprintf("@%s is not in the sudoers file.\nThis incident will be reported.\n", r.MentionName),
+			fmt.Sprintf("@%s is not allowed to run sudo on Slack.\nThis incident will be reported.\n", r.MentionName),
+			fmt.Sprintf("Sorry, user @%s is not allowed to execute '%s' as jbot on Slack.\nThis incident will be reported.\n", r.MentionName, m[1]),
+			fmt.Sprintf("Ignoring \"%s\" found in '.'\nUse \"./%s\" if this is the \"%s\" you wish to run.\n", m[1], m[1], m[1]),
+			fmt.Sprintf("%s: command not found\n", m[1]),
+			"Touch Yubikey:",
+			"Password:",
+			fmt.Sprintf("%d incorrect password attempts\n", rand.Intn(10)),
+		}
+		result = replies[rand.Intn(len(replies))]
+	}
+
 	return
 }
 
@@ -3866,7 +3909,7 @@ func chatterSeinfeld(msg string) (result string) {
 		"Did you know that the original title for War and Peace was War, What Is It Good For?",
 		"Moles -- freckles' ugly cousin.",
 		"Oh yeah? Well the jerk store called. They're running outta you.",
-		"Just let me ask you something. Is it 'FebRUary' or 'FebUary' Because I prefer 'FebUary,' and what is this 'ru'?",
+-		"Just let me ask you something. Is it 'FebRUary' or 'FebUary'? Because I prefer 'FebUary,' and what is this 'ru'?",
 		"Look, I work for the phone company. I've had a lot of experience with semantics, so don't try to lure me into some maze of circular logic.",
 		"What do you like better? The 'bro' or the 'mansiere'?",
 		"I don't think I've ever been to an appointment in my life where I wanted the other guy to show up.",
