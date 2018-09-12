@@ -143,6 +143,7 @@ var URLS = map[string]string{
 	"insults":     "https://XXX-SOME-LINK-WITH-VARIOUS-INUSLTS-HERE-XXX",
 	"jbot":        "https://github.com/jschauma/jbot/",
 	"jira":        "https://XXX-YOUR-JIRA-DOMAIN-HERE-XXX",
+-	"opsgenie":    "https://api.opsgenie.com/v2/",
 	"praise":      "https://XXX-YOUR-PRAISE-URL-HERE-XXX/",
 	"shakespeare": "https://XXX-SOME-LINK-WITH-SHAKESPEARE-QUOTES-HERE",
 	"speb":        "https://XXX-SOME-LINK-WITH-ALL-SPEB-REPLIES-HERE-XXX",
@@ -1593,23 +1594,21 @@ func cmdOncall(r Recipient, chName, args string) (result string) {
 
 func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (result string) {
 	schedule_found := false
-	team := args
+	wantedName := args
 	key := CONFIG["opsgenieApiKey"]
+
 	if len(key) < 1 {
 		result = "Unable to query OpsGenie -- no API key in config file."
 		return
 	}
 
-	if strings.HasSuffix(team, "_schedule") {
-		team = team[0:strings.Index(team, "_schedule")]
+	if strings.HasSuffix(wantedName, "_schedule") {
+		wantedName = wantedName[0:strings.Index(wantedName, "_schedule")]
 	}
 
-	/* XXX: This will leak your API key into logs.
-	 * OpsGenie API for read operations appears to require
-	 * a GET operation, so there isn't much we can do
-	 * about that. */
-	theUrl := fmt.Sprintf("https://api.opsgenie.com/v1/json/team?apiKey=%s", key)
-	data := getURLContents(theUrl, nil)
+	theUrl := URLS["opsgenie"] + "schedules"
+	urlArgs := map[string]string{ "Authorization" : "GenieKey " + key, }
+	data := getURLContents(theUrl, urlArgs)
 
         var jsonResult map[string]interface{}
 
@@ -1619,80 +1618,87 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 		return
 	}
 
-	if _, found := jsonResult["teams"]; !found {
+	if _, found := jsonResult["data"]; !found {
 		result = fmt.Sprintf("Unable to get team information from OpsGenie!\n")
 		return
 	}
 
 	var candidates []string
 
-	teams := jsonResult["teams"].([]interface{})
-	for _, t := range teams {
-		name := t.(map[string]interface{})["name"].(string)
-		if strings.EqualFold(team, name) {
-			schedules := t.(map[string]interface{})["schedules"].([]interface{})
-			for _, s := range schedules {
-				theUrl := fmt.Sprintf("https://api.opsgenie.com/v1/json/schedule/timeline?apiKey=%s&name=%s", key, url.QueryEscape(s.(string)))
-				data := getURLContents(theUrl, nil)
-				err := json.Unmarshal(data, &jsonResult)
-				if err != nil {
-					result = fmt.Sprintf("Unable to unmarshal opsgenie data: %s\n", err)
-					return
+	schedules := jsonResult["data"].([]interface{})
+	for _, s := range schedules {
+		id := s.(map[string]interface{})["id"].(string)
+		ownerTeam := s.(map[string]interface{})["ownerTeam"]
+		if ownerTeam == nil {
+			continue
+		}
+		sname := s.(map[string]interface{})["name"].(string)
+		if strings.HasSuffix(sname, "_schedule") {
+			sname = sname[0:strings.Index(sname, "_schedule")]
+		}
+		tid := ownerTeam.(map[string]interface{})["id"].(string)
+		if strings.EqualFold(sname, wantedName) {
+			theUrl := URLS["opsgenie"] + "schedules/" + id + "/timeline"
+			data := getURLContents(theUrl, urlArgs)
+			err := json.Unmarshal(data, &jsonResult)
+			if err != nil {
+				result = fmt.Sprintf("Unable to unmarshal opsgenie data: %s\n", err)
+				return
+			}
+
+			if _, found := jsonResult["data"]; !found {
+				result = fmt.Sprintf("No timeline found for oncall schedule '%s'.", s)
+				return
+			}
+
+			oncall := fillOpsGenieOncallFromTimeline(jsonResult)
+
+			var maxlen int
+			var oncallKeys []string
+			for rot, _ := range oncall {
+				if len(rot) > maxlen {
+					maxlen = len(rot)
 				}
-				if _, found := jsonResult["timeline"]; !found {
-					result = fmt.Sprintf("No timeline found for oncall schedule '%s'.", s)
-					return
+				oncallKeys = append(oncallKeys, rot)
+			}
+
+			sort.Strings(oncallKeys)
+
+			for _, rot := range oncallKeys {
+				oc := oncall[rot]
+				diff := maxlen - len(rot)
+				n := 0
+				for n < diff {
+					rot += " "
+					n++
 				}
-
-				oncall := fillOpsGenieOncallFromTimeline(jsonResult)
-
-				var maxlen int
-				var oncallKeys []string
-				for rot, _ := range oncall {
-					if len(rot) > maxlen {
-						maxlen = len(rot)
-					}
-					oncallKeys = append(oncallKeys, rot)
-				}
-
-				sort.Strings(oncallKeys)
-
-				for _, rot := range oncallKeys {
-					oc := oncall[rot]
-					diff := maxlen - len(rot)
-					n := 0
-					for n < diff {
-						rot += " "
-						n++
-					}
-					if len(oc) > 0 {
-						schedule_found = true
-						result += fmt.Sprintf("%s: %s\n", rot, strings.Join(oc, ", "))
-					}
+				if len(oc) > 0 {
+					schedule_found = true
+					result += fmt.Sprintf("%s: %s\n", rot, strings.Join(oc, ", "))
 				}
 			}
 			if !schedule_found {
-
 				result = fmt.Sprintf("Schedule found in OpsGenie for '%s', but nobody's currently oncall.", args)
 
-				theUrl = fmt.Sprintf("https://api.opsgenie.com/v1/json/team?apiKey=%s&name=%s", key, url.QueryEscape(args))
-				data = getURLContents(theUrl, nil)
+				theUrl = URLS["opsgenie"] + "teams/" + tid
+				data := getURLContents(theUrl, urlArgs)
 				err = json.Unmarshal(data, &jsonResult)
 				if err != nil {
 					result += fmt.Sprintf("Unable to unmarshal opsgenie data: %s\n", err)
 					return
 				}
 
-				if _, found := jsonResult["members"]; !found {
+				if _, found := jsonResult["data"]; !found {
 					return
 				}
 
 				var members []string
 
-				teams := jsonResult["members"].([]interface{})
-				for _, t := range teams {
-					name := t.(map[string]interface{})["user"].(string)
-					members = append(members, name)
+				teamData := jsonResult["data"].(interface{})
+				teamMembers := teamData.(map[string]interface{})["members"].([]interface{})
+				for _, m := range teamMembers {
+					user := m.(map[string]interface{})["user"].(interface{})
+					members = append(members, user.(map[string]interface{})["username"].(string))
 				}
 
 				if len(members) > 0 {
@@ -1700,13 +1706,13 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 					result += strings.Join(members, ", ")
 				}
 			}
-		} else if strings.Contains(strings.ToLower(name), strings.ToLower(team)) {
-			candidates = append(candidates, name)
+		} else if strings.Contains(strings.ToLower(sname), strings.ToLower(wantedName)) {
+			candidates = append(candidates, sname)
 		}
 	}
 
 	if !schedule_found && len(candidates) > 0 {
-		if len(candidates) == 1 && strings.EqualFold(team, candidates[0]) &&
+		if len(candidates) == 1 && strings.EqualFold(wantedName, candidates[0]) &&
 				allowRecursion {
 			return cmdOncallOpsGenie(r, chName, candidates[0], false)
 		}
@@ -4358,8 +4364,8 @@ func fail(msg string) {
 }
 
 func fillOpsGenieOncallFromTimeline(jsonResult map[string]interface{}) (oncall map[string][]string) {
-	timeline := jsonResult["timeline"].(map[string]interface{})
-	finalSchedule := timeline["finalSchedule"].(map[string]interface{})
+	timeline := jsonResult["data"].(map[string]interface{})
+	finalSchedule := timeline["finalTimeline"].(map[string]interface{})
 	rotations := finalSchedule["rotations"].([]interface{})
 
 	oncall = make(map[string][]string)
@@ -4372,24 +4378,40 @@ func fillOpsGenieOncallFromTimeline(jsonResult map[string]interface{}) (oncall m
 
 		periods := rot.(map[string]interface{})["periods"].([]interface{})
 		for _, p := range periods {
-			tmp := p.(map[string]interface{})["flattenedRecipients"]
-			if tmp != nil {
+			rotationType := p.(map[string]interface{})["type"].(string)
+			if rotationType == "historical" {
 				continue
 			}
 
-			endTime := int64(p.(map[string]interface{})["endTime"].(float64))
-			startTime := int64(p.(map[string]interface{})["startTime"].(float64))
-			end := time.Unix(endTime/1000, endTime%1000)
-			start := time.Unix(startTime/1000, startTime%1000)
-			if (time.Since(end) > 0) || time.Since(start) < 0 {
+			recipient := p.(map[string]interface{})["recipient"]
+			if recipient == nil {
 				continue
 			}
 
-			recipients := p.(map[string]interface{})["recipients"].([]interface{})
-			for _, r := range recipients {
-				current := r.(map[string]interface{})["displayName"].(string)
-				oncall[rname] = append(oncall[rname], current)
+			endDate := p.(map[string]interface{})["endDate"].(string)
+			startDate := p.(map[string]interface{})["startDate"].(string)
+
+			var end time.Time
+			var start time.Time
+
+			end, err := time.Parse(time.RFC3339, endDate)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Unable to parse endDate: '%s': %s\n", endDate, err)
+				return
 			}
+			start, err = time.Parse(time.RFC3339, startDate)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Unable to parse startDate: '%s': %s\n", startDate, err)
+				return
+			}
+
+			now := time.Now()
+			if now.Before(start) || now.After(end) {
+				continue
+			}
+
+			current := recipient.(map[string]interface{})["name"].(string)
+			oncall[rname] = append(oncall[rname], current)
 		}
 	}
 
@@ -4665,6 +4687,8 @@ func getSortedKeys(hash map[string]int, rev bool) (sorted []string) {
  * - if args["ua"] is "true", then we fake the User-Agent
  * - if args["basic-auth-user"] is set, use that username for basic HTTP auth
  * - if args["basic-auth-password"] is set, use that password for basic HTTP auth
+ * - if any args["header"] is set, use that value to set the given header
+ *   set the given 'key=value' headers
  */
 func getURLContents(givenUrl string, args map[string]string) (data []byte) {
 	verbose(3, "Fetching %s)...", givenUrl)
@@ -4713,18 +4737,19 @@ func getURLContents(givenUrl string, args map[string]string) (data []byte) {
 		return
 	}
 
-	if ua, ok := args["ua"]; ok && ua == "true" {
-		request.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36")
-	}
-
 	var ba_user string;
 	var ba_pass string;
 
-	if u, ok := args["basic-auth-user"]; ok {
-		ba_user = u
-	}
-	if p, ok := args["basic-auth-password"]; ok {
-		ba_pass = p
+	for key, val := range args {
+		if key == "ua" {
+			request.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36")
+		} else if key == "basic-auth-user" {
+			ba_user = val
+		} else if key == "basic-auth-password" {
+			ba_pass = val
+		} else {
+			request.Header.Set(key, val)
+		}
 	}
 
 	if len(ba_user) > 0 {
@@ -5530,7 +5555,6 @@ func updateSlackChannels() {
 		}
 	}
 }
-
 
 
 func updateRoster(users []*hipchat.User) {
