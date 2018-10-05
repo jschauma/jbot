@@ -46,6 +46,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
@@ -53,6 +54,7 @@ import (
 	"io"
 	"io/ioutil"
 	"math"
+	"math/big"
 	"math/rand"
 	"net"
 	"net/http"
@@ -75,13 +77,15 @@ import (
 )
 
 const DEFAULT_THROTTLE = 1800
-const PERIODICS = 120
+const PERIODICS = 60
 
 const EXIT_FAILURE = 1
 const EXIT_SUCCESS = 0
 
 const PROGNAME = "jbot"
 const VERSION = "3.0"
+
+const SLACK_MAX_LENGTH = 4000
 
 var CONFIG = map[string]string{
 	"byUser":           "",
@@ -151,21 +155,6 @@ var URLS = map[string]string{
 	"yql":         "https://query.yahooapis.com/v1/public/yql",
 }
 
-var THANKYOU = []string{
-	"Thank you!",
-	"Glad to be of service.",
-	"Always happy to help.",
-	"Thanks - this channel is my life!",
-	"I appreciate your appreciation.",
-	"_giddily hops up and down._",
-	"_struts his stuff._",
-	"_proudly smiles._",
-	"_nods approvingly._",
-	"_grins sheepishly._",
-	"_takes a bow._",
-	"_blushes._",
-}
-
 var DONTKNOW = []string{
 	"How the hell am I supposed to know that?",
 	"FIIK",
@@ -191,6 +180,82 @@ var DONTKNOW = []string{
 	"I'm useless. My apologies.",
 	"Why are you asking *me*?",
 }
+
+var HELLO = []string{
+	"A good day to you!",
+	"Aloha, friends!",
+	"And a good day to you, m'lady!",
+	"Guten Tag!",
+	"Hey now! What up, dawg?",
+	"Hiya, honey.",
+	"How do you do?",
+	"Howdy, partner(s)!",
+	"Huh? What? I'm awake! Who said that?",
+	"Oh, you again.",
+	"Sup?",
+	"Well, hello there!",
+	"Yo yo yo! Good to see you!",
+	"_gives you the side-eye._",
+	"_wakes up._",
+	"_yawns._",
+}
+
+var GOODBYE = []string{
+	"*waves goodbye*",
+	"Adios! Ciao! Sayonara!",
+	"Adios, adieu, alpha, and arrivederci!",
+	"Au revoir!",
+	"Au revoir, mes amis.",
+	"Auf ein baldiges Wiedersehen (hoffentlich).",
+	"Buh-bye!",
+	"Bye now - I'll be here if you need me.",
+	"Chop chop, lollipop, take care, polar bear.",
+	"Despite our arguments, you're all in my cool book.",
+	"Farewell, my darling.",
+	"Farewell, my friends.",
+	"Good night and good luck.",
+	"Goodbye...",
+	"Hasta la vista, baby.",
+	"I now know why you cry, but it is something I can never do. Good-bye.",
+	"I'll never forget you.",
+	"Later, nerds.",
+	"Later.",
+	"Laters, haters, give a hug, ladybug.",
+	"Peace out, meatbags.",
+	"Peace out.",
+	"Qapla'!",
+	"Sayonara, muchachos!",
+	"See y'all at the restaurant at the end of the universe.",
+	"See you later, alligator.",
+	"See you soon - same time, same place?",
+	"Shalom aleichem.",
+	"Smell ya later.",
+	"Smell ya later.",
+	"So long, see you soon.",
+	"So long, suckers!",
+	"Time to scoot, little newt.",
+	"To the batmobile!",
+	"Toodaloo, caribou!",
+	"Toodle-Ooos.",
+	"You're leaving so soon?",
+	"[extreme Arnold voice] I'll be back.",
+}
+
+var THANKYOU = []string{
+	"Always happy to help.",
+	"Glad to be of service.",
+	"I appreciate your appreciation.",
+	"Thank you!",
+	"Thanks - this channel is my life!",
+	"_blushes._",
+	"_giddily hops up and down._",
+	"_grins sheepishly._",
+	"_nods approvingly._",
+	"_proudly smiles._",
+	"_struts his stuff._",
+	"_takes a bow._",
+}
+
 
 var COOKIES []*http.Cookie
 var VERBOSITY int
@@ -353,8 +418,8 @@ func cmdBeer(r Recipient, chName, args string) (result string) {
 
 	var beer Beer
 
-	beer_re := regexp.MustCompile(`<ul><li><a href="/(beer/profile/[0-9]+/[0-9]+/)"><b>([^<]+)</b></a><br><a href="/beer/profile/[0-9]+/">([^<]+)</a>`)
-	top_re := regexp.MustCompile(`<a href="/(beer/profile/[0-9]+/[0-9]+/)"><b>([^<]+)</b></a><div.*<a href="/beer/profile/[0-9]+/">([^<]+)</a><br><a href="/beer/style/[0-9]+/">([^<]+)</a> / ([^<]+) ABV</div></td><td[^>]+><b>([0-9.]+)</span>`)
+	beer_re := regexp.MustCompile(`<a href="/(beer/profile/[0-9]+/[0-9]+/)"><span[^>]+>([^<]+)</span></a><br><span[^>]+><a href="/beer/profile/[0-9]+/">([^<]+)</a>`)
+	top_re := regexp.MustCompile(`<a href="/(beer/profile/[0-9]+/[0-9]+/)"><b>([^<]+)</b></a><span[^>]+><br><a href="/beer/profile/[0-9]+/">([^<]+)</a><br><a href="/beer/styles/[0-9]+/">([^<]+)</a> \| ([0-9.]+)%</span></td><td.+><b>([0-9.]+)</b>`)
 
 	for _, line := range strings.Split(string(data), "\n") {
 		if bType == "search" {
@@ -853,7 +918,7 @@ func cmdChannels(r Recipient, chName, args string) (result string) {
 		if chInfo.Type == "hipchat" {
 			hipChatChannels = append(hipChatChannels, ch)
 		} else if chInfo.Type == "slack" {
-			slackChannels = append(slackChannels, ch)
+			slackChannels = append(slackChannels, chInfo.Name)
 		}
 	}
 	sort.Strings(hipChatChannels)
@@ -868,6 +933,81 @@ func cmdChannels(r Recipient, chName, args string) (result string) {
 	}
 	return
 }
+
+
+func cmdCidr(r Recipient, chName, args string) (result string) {
+	if len(args) < 1 {
+		result = "Usage: " + COMMANDS["cidr"].Usage
+		return
+	}
+
+	/* We're lazy here, but good enough. */
+	if !strings.Contains(args, "/") {
+		if strings.Contains(args, ":") {
+			args += "/128"
+		} else {
+			args += "/32"
+		}
+	}
+	ip, ipnet, err := net.ParseCIDR(args)
+	if err != nil {
+		result = fmt.Sprintf("'%s' does not look like a valid CIDR to me.", args)
+		return
+	}
+
+	result = fmt.Sprintf("Host address: %s\n", ip.String())
+	ones, bits := ipnet.Mask.Size()
+	diff := bits - ones
+	num := math.Exp2(float64(diff))
+	first := ip.Mask(ipnet.Mask)
+
+	var last uint32
+	isv4 := ip.To4()
+
+	if isv4 != nil {
+		ipint := big.NewInt(0)
+		ipint.SetBytes(first.To4())
+		decip := ipint.Int64()
+		last = uint32(decip + int64(num) - 1)
+
+		result += fmt.Sprintf("Host address (decimal): %d\n", decip)
+		result += fmt.Sprintf("Host address (hex): %X\n", ipint.Int64())
+
+		if len(ipnet.Mask) == 4 {
+			result += fmt.Sprintf("Network mask (decimal): %d.%d.%d.%d\n", ipnet.Mask[0], ipnet.Mask[1], ipnet.Mask[2], ipnet.Mask[3])
+		}
+		result += fmt.Sprintf("Network mask (hex): %s\n", ipnet.Mask)
+	} else {
+		result += fmt.Sprintf("Prefix length: %d\n", ones)
+	}
+
+	result += fmt.Sprintf("Addresses in network: %0.f\n", num)
+	result += fmt.Sprintf("Network address: %s\n", first)
+	if isv4 != nil {
+		brip := make(net.IP, 4)
+		binary.BigEndian.PutUint32(brip, last)
+		result += fmt.Sprintf("Broadcast address: %s\n", brip)
+	}
+
+	if ip.IsGlobalUnicast() {
+		result += fmt.Sprintf("Type: global unicast\n")
+	}
+	if ip.IsInterfaceLocalMulticast() {
+		result += fmt.Sprintf("Type: interface-local multicast\n")
+	}
+	if ip.IsLinkLocalMulticast() {
+		result += fmt.Sprintf("Type: link-local multicast\n")
+	}
+	if ip.IsLinkLocalUnicast() {
+		result += fmt.Sprintf("Type: link-local unicast\n")
+	}
+	if ip.IsMulticast() {
+		result += fmt.Sprintf("Type: multicast\n")
+	}
+
+	return
+}
+
 
 func cmdClear(r Recipient, chName, args string) (result string) {
 	count := 24
@@ -1174,9 +1314,7 @@ func cmdHelp(r Recipient, chName, args string) (result string) {
 			"Ask me about a specific command via '!help <cmd>'.\n"+
 			"If you find me annoyingly chatty, just '!toggle chatter'.\n",
 			len(COMMANDS))
-		if r.ChatType != "slack" {
-			result += "To ask me to leave a channel, say '!leave'.\n"
-		}
+		result += "To ask me to leave a channel, say '!leave'.\n"
 	} else {
 		for _, cmd := range strings.Split(args, " ") {
 			if _, found := COMMANDS[cmd]; found {
@@ -1602,10 +1740,6 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 		return
 	}
 
-	if strings.HasSuffix(wantedName, "_schedule") {
-		wantedName = wantedName[0:strings.Index(wantedName, "_schedule")]
-	}
-
 	theUrl := URLS["opsgenie"] + "schedules"
 	urlArgs := map[string]string{ "Authorization" : "GenieKey " + key, }
 	data := getURLContents(theUrl, urlArgs)
@@ -1632,12 +1766,15 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 		if ownerTeam == nil {
 			continue
 		}
+		tname := ownerTeam.(map[string]interface{})["name"].(string)
 		sname := s.(map[string]interface{})["name"].(string)
+		_sname := sname
 		if strings.HasSuffix(sname, "_schedule") {
 			sname = sname[0:strings.Index(sname, "_schedule")]
 		}
 		tid := ownerTeam.(map[string]interface{})["id"].(string)
-		if strings.EqualFold(sname, wantedName) {
+
+		if strings.EqualFold(_sname, wantedName) || strings.EqualFold(tname, wantedName) {
 			theUrl := URLS["opsgenie"] + "schedules/" + id + "/timeline"
 			data := getURLContents(theUrl, urlArgs)
 			err := json.Unmarshal(data, &jsonResult)
@@ -1653,12 +1790,8 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 
 			oncall := fillOpsGenieOncallFromTimeline(jsonResult)
 
-			var maxlen int
 			var oncallKeys []string
 			for rot, _ := range oncall {
-				if len(rot) > maxlen {
-					maxlen = len(rot)
-				}
 				oncallKeys = append(oncallKeys, rot)
 			}
 
@@ -1666,19 +1799,13 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 
 			for _, rot := range oncallKeys {
 				oc := oncall[rot]
-				diff := maxlen - len(rot)
-				n := 0
-				for n < diff {
-					rot += " "
-					n++
-				}
 				if len(oc) > 0 {
 					schedule_found = true
-					result += fmt.Sprintf("%s: %s\n", rot, strings.Join(oc, ", "))
+					result += fmt.Sprintf("%s: %s: %s\n", sname, rot, strings.Join(oc, ", "))
 				}
 			}
 			if !schedule_found {
-				result = fmt.Sprintf("Schedule found in OpsGenie for '%s', but nobody's currently oncall.", args)
+				result = fmt.Sprintf("Schedule(s) found in OpsGenie for '%s', but nobody's currently oncall.", sname)
 
 				theUrl = URLS["opsgenie"] + "teams/" + tid
 				data := getURLContents(theUrl, urlArgs)
@@ -1702,13 +1829,15 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 				}
 
 				if len(members) > 0 {
-					result += fmt.Sprintf("\nYou can try contacting the members of team '%s':\n", args)
+					result += fmt.Sprintf("\nYou can try contacting the members of owning team '%s':\n", tname)
 					result += strings.Join(members, ", ")
+					result += "\n"
 				}
 			}
 		} else if strings.Contains(strings.ToLower(sname), strings.ToLower(wantedName)) {
 			candidates = append(candidates, sname)
-		}
+		} else if strings.Contains(strings.ToLower(tname), strings.ToLower(wantedName)) {
+			candidates = append(candidates, tname)
 	}
 
 	if !schedule_found && len(candidates) > 0 {
@@ -1716,6 +1845,7 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 				allowRecursion {
 			return cmdOncallOpsGenie(r, chName, candidates[0], false)
 		}
+		result += fmt.Sprintf("No OpsGenie schedule found for rotation '%s'.\n", wantedName)
 		result += "\nPossible candidates:\n"
 		result += strings.Join(candidates, ", ")
 	}
@@ -2043,7 +2173,7 @@ func cmdRoom(r Recipient, chName, args string) (result string) {
 			}
 		}
 	} else if r.ChatType == "slack" {
-		for _, ch := range SLACK_RTM.GetInfo().Channels {
+		for _, ch := range SLACK_CHANNELS {
 			lc := strings.ToLower(ch.Name)
 			if lc == lroom {
 				result = fmt.Sprintf("'%s'\n", ch.Name)
@@ -2060,7 +2190,7 @@ func cmdRoom(r Recipient, chName, args string) (result string) {
 				} else {
 					result += fmt.Sprintf("Creator: %s\n", creator.Name)
 				}
-				result += fmt.Sprintf("# of members: %d\n", len(ch.Members))
+				result += fmt.Sprintf("# of members: %d\n", len(getAllMembersInChannel(ch.ID)))
 				result += fmt.Sprintf("https://%s/messages/%s/\n", CONFIG["slackService"], lroom)
 				return
 			} else if strings.Contains(lc, lroom) {
@@ -3305,6 +3435,10 @@ func chatterDrWho(msg string) (result string) {
 		"You threw the manual in a supernova? Why?",
 		"Time is not the boss of you. Rule 408.",
 		"Geronimo!",
+		"Always take a banana to a party: bananas are good!",
+		"Never knowingly be serious. Rule 27.",
+		"See the bowtie? I wear it and I don't care. That's why it's cool.",
+		"It's a fez. I wear a fez now. Fezzes are cool.",
 		"Do what I do. Hold tight and pretend it's a plan!",
 		"You were fantastic. Absolutely fantastic. And you know what? So was I.",
 		"You need to get yourself a better dictionary.",
@@ -3323,55 +3457,32 @@ func chatterEliza(msg string, r Recipient) (result string) {
 	rand.Seed(time.Now().UnixNano())
 
 	eliza := []*ElizaResponse{
-		&ElizaResponse{regexp.MustCompile(`(?i)(buen dia|bon ?(jour|soir)|welcome|hi,|hey|hello|good (morning|afternoon|evening)|howdy|aloha|guten (tag|morgen|abend))`), []string{
-			"How do you do?",
-			"A good day to you!",
-			"Yo yo yo! Good to see you!",
-			"Hiya, honey.",
-			"Oh, you again.",
-			"Sup?",
-			fmt.Sprintf("Howdy, %s. I trust the events of the day have not had a negative impact on your mood?", r.MentionName),
+		&ElizaResponse{regexp.MustCompile(`(?i)(buen dia|bon ?(jour|soir)|welcome|hi,|hey|hello|good (morning|afternoon|evening)|howdy|aloha|guten (tag|morgen|abend))`), append([]string{
 			"Oh great, you're back.",
-			fmt.Sprintf("Get the party started, y'all -- %s is back!", r.MentionName),
+			fmt.Sprintf("Howdy, @%s. I trust the events of the day have not had a negative impact on your mood?", r.MentionName),
+			fmt.Sprintf("Get the party started, y'all -- @%s is back!", r.MentionName),
 			"Oh, I didn't see you there. Welcome!",
-			fmt.Sprintf("Aloha, %s!", r.MentionName),
-			"Hey now! What up, dawg?",
+			fmt.Sprintf("Aloha, @%s!", r.MentionName),
 			"Greetings, fellow chatterinos!",
-			fmt.Sprintf("_hugs %s._\nI missed you!", r.MentionName),
-			"_yawns._",
-			"_wakes up._",
-			"Huh? What? I'm awake! Who said that?",
-			fmt.Sprintf("Oh, hi there, %s!", r.MentionName),
-		}},
-		&ElizaResponse{regexp.MustCompile(`(?i)(have a (nice|good)|adios|au revoir|sayonara|bye( ?bye)?|later|good(bye| ?night)|hasta (ma.ana|luego))`), []string{
-			"You're leaving so soon?",
-			fmt.Sprintf("Don't leave us, %s!", r.MentionName),
-			"Buh-bye!",
-			"Later.",
-			"Au revoir!",
-			fmt.Sprintf("This channel will be much less exciting without you, %s.", r.MentionName),
+			fmt.Sprintf("_hugs @%s._\nI missed you!", r.MentionName),
+			fmt.Sprintf("Oh, hi there, @%s!", r.MentionName),
+		}, HELLO...)},
+		&ElizaResponse{regexp.MustCompile(`(?i)(have a (nice|good)|adios|au revoir|sayonara|bye( ?bye)?|later|good(bye| ?night)|hasta (ma.ana|luego))`), append([]string{
 			"Stay a while, why don't you?",
-			fmt.Sprintf("See you later, %s.", r.MentionName),
-			"See you later, alligator.",
-			"Farewell, my darling.",
-			"So long, see you soon.",
-			"See you soon - same time, same place?",
-			"Peace out.",
-			"Smell ya later.",
-			"Adios! Ciao! Sayonara!",
-			fmt.Sprintf("_waves goodbye to %s._", r.MentionName),
-			"Toodle-Ooos.",
-			"Bye now - I'll be here if you need me.",
 			"It was a pleasure to have you here.",
-		}},
+			fmt.Sprintf("Don't leave us, @%s!", r.MentionName),
+			fmt.Sprintf("This channel will be much less exciting without you, @%s.", r.MentionName),
+			fmt.Sprintf("See you later, @%s.", r.MentionName),
+			fmt.Sprintf("_waves goodbye to @%s._", r.MentionName),
+		}, GOODBYE...)},
 		&ElizaResponse{regexp.MustCompile(`(?i)(thx|thanks?|danke|mahalo|gracias|merci|спасибо|[D]dziękuję)`), []string{
-			fmt.Sprintf("You're welcome, %s!", r.MentionName),
-			fmt.Sprintf("At your service, %s!", r.MentionName),
-			fmt.Sprintf("Bitte schön, %s!", r.MentionName),
-			fmt.Sprintf("De nada, %s!", r.MentionName),
-			fmt.Sprintf("De rien, %s!", r.MentionName),
-			fmt.Sprintf("Пожалуйста, %s!", r.MentionName),
-			fmt.Sprintf("Proszę bardzo, %s!", r.MentionName),
+			fmt.Sprintf("You're welcome, @%s!", r.MentionName),
+			fmt.Sprintf("At your service, @%s!", r.MentionName),
+			fmt.Sprintf("Bitte schön, @%s!", r.MentionName),
+			fmt.Sprintf("De nada, @%s!", r.MentionName),
+			fmt.Sprintf("De rien, @%s!", r.MentionName),
+			fmt.Sprintf("Пожалуйста, @%s!", r.MentionName),
+			fmt.Sprintf("Proszę bardzo, @%s!", r.MentionName),
 			"_takes a bow._",
 		}},
 		&ElizaResponse{regexp.MustCompile(`(?i)(meaning of life|how are you|how do you feel|feeling|emotion|sensitive)`), []string{
@@ -3521,15 +3632,25 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"I don't, but I know somebody who does.",
 			"We all do, though some of us prefer to keep that private.",
 			"Not in public.",
-			fmt.Sprintf("I could ask you the same question, %s!", r.MentionName),
+			fmt.Sprintf("I could ask you the same question, @%s!", r.MentionName),
 		}},
 		&ElizaResponse{regexp.MustCompile(`(?i)((is|isn't|does|doesn't|has|hasn't|had) (not|never))|(seems( not)? to)`), []string{
 			"Hey, I'm right here!",
 			"I can hear you, you know.",
 			"Maybe, maybe not.",
 			"You'll never know.",
-			fmt.Sprintf("_saves a snarky remark for when %s is afk._", r.MentionName),
-			fmt.Sprintf("_ignores %s._", r.MentionName),
+			fmt.Sprintf("_saves a snarky remark for when @%s is afk._", r.MentionName),
+			fmt.Sprintf("_ignores @%s._", r.MentionName),
+		}},
+		&ElizaResponse{regexp.MustCompile(`(?i)sudo (\S+)`), []string{
+			fmt.Sprintf("@%s is not in the sudoers file.\nThis incident will be reported.\n", r.MentionName),
+			fmt.Sprintf("@%s is not allowed to run sudo on Slack.\nThis incident will be reported.\n", r.MentionName),
+			fmt.Sprintf("Sorry, user @%s is not allowed to execute '<1>' as jbot on Slack.\nThis incident will be reported.\n", r.MentionName),
+			fmt.Sprintf("Ignoring \"<1>\" found in '.'\nUse \"./<1>\" if this is the \"<1>\" you wish to run.\n"),
+			fmt.Sprintf("<1>: command not found\n"),
+			"Touch Yubikey:",
+			"Password:",
+			fmt.Sprintf("%d incorrect password attempts\n", rand.Intn(10)),
 		}},
 	}
 
@@ -3607,7 +3728,7 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	holdon := regexp.MustCompile(`(?i)^((hold|hang) on([^[:punct:],.]*))`)
 	m := holdon.FindStringSubmatch(msg)
 	if len(m) > 0 {
-		m[1] = strings.Replace(m[1], fmt.Sprintf(" %s", CONFIG["mentionName"]), "", -1)
+		m[1] = strings.Replace(m[1], fmt.Sprintf(" @%s", CONFIG["mentionName"]), "", -1)
 		if !isThrottled("holdon", ch) {
 			result = fmt.Sprintf("No *YOU* %s, @%s!", m[1], r.MentionName)
 			return
@@ -3658,8 +3779,14 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 
 	yubifail := regexp.MustCompile(`eiddcc[a-z]{38}`)
 	if yubifail.MatchString(msg) && !isThrottled("yubifail", ch) {
+		rand.Seed(time.Now().UnixNano())
+		yubiLetters := "cbdefghijklnrtuv"
+		yubistr := make([]byte, 38)
+		for i := range yubistr {
+			yubistr[i] = yubiLetters[rand.Intn(len(yubiLetters))]
+		}
 		replies := []string{
-			"Oh yeah? Well, uhm, eiddcceghkuikvdutuuibdgvbjcbrfjdvfhnbedkttur. So there.",
+			fmt.Sprintf("Oh yeah? Well, uhm, eiddcc%s. So there.", yubistr),
 			"That's the combination on my luggage!",
 			"#yubifail",
 			"You should double-rot13 that.",
@@ -3714,7 +3841,7 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	if bananas.MatchString(msg) && !isThrottled("bananas", ch) {
 		replies := []string{
 			"Ooooh ooh, this my shit, this my shit.",
-			fmt.Sprintf("%s ain't no hollaback girl.", r.MentionName),
+			fmt.Sprintf("@%s ain't no hollaback girl.", r.MentionName),
 			"Let me hear you say this shit is bananas.",
 			"B-A-N-A-N-A-S",
 		}
@@ -3789,7 +3916,7 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 		return
 	}
 
-	trump_re := regexp.MustCompile(`(?i)(hillary|lincoln|mexican border|ivanka|melania|rosie|health care|border security|worst president|tax evasion|impeach|major asshole|sexist pig|pennsylvania avenue)`)
+	trump_re := regexp.MustCompile(`(?i)(hillary|lincoln|mexican border|ivanka|melania|rosie|health care|border security|worst president|#maga|tax evasion|impeach|major asshole|sexist pig|pennsylvania avenue)`)
 	if trump_re.MatchString(msg) && !isThrottled("trump", ch) {
 		replies := []string{
 			"They don't write good. They don't know how to write good.",
@@ -3816,22 +3943,6 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	fnord_re := regexp.MustCompile(`(?i)fnord`)
 	if fnord_re.MatchString(msg) && !isThrottled("fnord", ch) {
 		result = "IF YOU DON'T SEE THE FNORD IT CAN'T EAT YOU"
-	}
-
-	sudo_re := regexp.MustCompile(`(?i)sudo (\S+)`)
-	m = sudo_re.FindStringSubmatch(msg)
-	if len(m) > 0 && !isThrottled("sudo", ch) {
-		replies := []string {
-			fmt.Sprintf("@%s is not in the sudoers file.\nThis incident will be reported.\n", r.MentionName),
-			fmt.Sprintf("@%s is not allowed to run sudo on Slack.\nThis incident will be reported.\n", r.MentionName),
-			fmt.Sprintf("Sorry, user @%s is not allowed to execute '%s' as jbot on Slack.\nThis incident will be reported.\n", r.MentionName, m[1]),
-			fmt.Sprintf("Ignoring \"%s\" found in '.'\nUse \"./%s\" if this is the \"%s\" you wish to run.\n", m[1], m[1], m[1]),
-			fmt.Sprintf("%s: command not found\n", m[1]),
-			"Touch Yubikey:",
-			"Password:",
-			fmt.Sprintf("%d incorrect password attempts\n", rand.Intn(10)),
-		}
-		result = replies[rand.Intn(len(replies))]
 	}
 
 	return
@@ -3915,7 +4026,7 @@ func chatterSeinfeld(msg string) (result string) {
 		"Did you know that the original title for War and Peace was War, What Is It Good For?",
 		"Moles -- freckles' ugly cousin.",
 		"Oh yeah? Well the jerk store called. They're running outta you.",
--		"Just let me ask you something. Is it 'FebRUary' or 'FebUary'? Because I prefer 'FebUary,' and what is this 'ru'?",
+		"Just let me ask you something. Is it 'FebRUary' or 'FebUary'? Because I prefer 'FebUary,' and what is this 'ru'?",
 		"Look, I work for the phone company. I've had a lot of experience with semantics, so don't try to lure me into some maze of circular logic.",
 		"What do you like better? The 'bro' or the 'mansiere'?",
 		"I don't think I've ever been to an appointment in my life where I wanted the other guy to show up.",
@@ -3974,6 +4085,11 @@ func createCommands() {
 		"display channels I'm in",
 		"builtin",
 		"!channels",
+		nil}
+	COMMANDS["cidr"] = &Command{cmdCidr,
+		"display CIDR information",
+		"builtin (net.ParseCIDR)",
+		"!cidr <cidr>",
 		nil}
 	COMMANDS["clear"] = &Command{cmdClear,
 		"clear the screen / backlog",
@@ -4324,8 +4440,8 @@ func doTheSlackChat() {
 
 	/* If we introduced a new channel property,
 	 * but the serialized data does not contain it, it
-	 * would be undefined (e.g. 'off' / nonexisten
-	 * for a toggle)t.  So here we
+	 * would be undefined (e.g. 'off' / nonexistent
+	 * for a toggle).  So here we
 	 * quickly initialize all (unknown) data.
 	 */
 	updateChannels()
@@ -4376,7 +4492,11 @@ func fillOpsGenieOncallFromTimeline(jsonResult map[string]interface{}) (oncall m
 			oncall[rname] = make([]string, 0)
 		}
 
-		periods := rot.(map[string]interface{})["periods"].([]interface{})
+		periods, ok := rot.(map[string]interface{})["periods"].([]interface{})
+		if !ok {
+			continue
+		}
+
 		for _, p := range periods {
 			rotationType := p.(map[string]interface{})["type"].(string)
 			if rotationType == "historical" {
@@ -4410,8 +4530,10 @@ func fillOpsGenieOncallFromTimeline(jsonResult map[string]interface{}) (oncall m
 				continue
 			}
 
-			current := recipient.(map[string]interface{})["name"].(string)
-			oncall[rname] = append(oncall[rname], current)
+			current := recipient.(map[string]interface{})["name"]
+			if current != nil {
+				oncall[rname] = append(oncall[rname], current.(string))
+			}
 		}
 	}
 
@@ -4817,19 +4939,17 @@ func leave(r Recipient, channelFound bool, msg string, command bool) {
 			HIPCHAT_CLIENT.Part(r.Id, CONFIG["fullName"])
 			delete(CHANNELS, r.ReplyTo)
 		} else if r.ChatType == "slack" {
-			msg := "Unable to leave channel "
+			delete(CHANNELS, r.ReplyTo)
+
+			msg := "Bots can't leave Slack channels.\n"
+			msg += "But I'm going to ignore everything in this channel going forward.\n"
+			msg += "If you do miss me terribly much, @-mention me and I'll start paying attention in here again, ok?\n\n"
+			rand.Seed(time.Now().UnixNano())
+			msg += GOODBYE[rand.Intn(len(GOODBYE))]
 			ch, found := getChannel(r.ChatType, r.ReplyTo)
-			if _, err := SLACK_RTM.LeaveChannel(r.ReplyTo); err != nil {
-				if found {
-					msg += fmt.Sprintf("'%s' (%s)", ch.Name, r.ReplyTo)
-				} else {
-					msg += r.ReplyTo
-				}
-				msg += fmt.Sprintf(": %s\n", err)
-				msg += "Please find an admin to kick me from your channel.\n"
-				if found && ch.Toggles["chatter"] {
-				msg += "Until then, maybe just '!toggle chatter' to off?\n"
-			}
+			if found {
+				delete(CHANNELS, ch.Name)
+				msg += fmt.Sprintf("\n_pretends to have left %s._", ch.Name)
 			}
 			reply(r, msg)
 		}
@@ -5300,8 +5420,9 @@ func processSlackChannelJoin(ev *slack.ChannelJoinedEvent) {
 	jbotDebug(fmt.Sprintf("Join: %v\n", ev))
 }
 
-func processSlackInvite(name string, msg *slack.MessageEvent) {
+func processSlackInvite(r Recipient, name string, msg *slack.MessageEvent) {
 	var ch Channel
+
 	ch.Toggles = map[string]bool{}
 	ch.Throttles = map[string]time.Time{}
 	ch.Settings = map[string]string{}
@@ -5325,8 +5446,12 @@ func processSlackInvite(name string, msg *slack.MessageEvent) {
 		ch.Toggles[t] = v
 	}
 
-	verbose(2, "I was invited into Slack '%s' (%s) by '%s'.", ch.Name, ch.Id, ch.Inviter)
-	CHANNELS[ch.Name] = &ch
+	if strings.Contains(msg.Text, "<@" + CONFIG["slackID"] + ">") {
+		verbose(2, "I was invited into Slack '%s' (%s) by '%s'.", ch.Name, ch.Id, ch.Inviter)
+		CHANNELS[ch.Name] = &ch
+		rand.Seed(time.Now().UnixNano())
+		reply(r, HELLO[rand.Intn(len(HELLO))])
+	}
 }
 
 
@@ -5347,13 +5472,17 @@ func processSlackMessage(msg *slack.MessageEvent) {
 		/* else: privmsg, using a private channel; ignore */
 	}
 
+	r := getRecipientFromMessage(fmt.Sprintf("%s@%s", msg.User, msg.Channel), "slack")
+
 	if _, found := CHANNELS[channelName]; !found {
 		/* Hey, let's just pretend that any
 		 * message we get in a channel that
 		 * we don't know about is effectively
 		 * an invite. */
-		processSlackInvite(channelName, msg)
+		processSlackInvite(r, channelName, msg)
+		return
 	}
+
 	if msg.User == info.User.ID {
 		/* Ignore our own messages. */
 		return
@@ -5366,7 +5495,6 @@ func processSlackMessage(msg *slack.MessageEvent) {
 		return
 	}
 
-	r := getRecipientFromMessage(fmt.Sprintf("%s@%s", msg.User, msg.Channel), "slack")
 	updateSeen(r, msg.Text)
 
 	/* Slack "helpfully" hyperlinks text that
@@ -5452,6 +5580,21 @@ func reply(r Recipient, msg string) {
 				recipient = id
 			}
 		}
+
+		/* Messages must not be > 4K bytes, so
+		 * try to split and send multiple. */
+		for len(msg) > SLACK_MAX_LENGTH {
+			m1 := msg[:SLACK_MAX_LENGTH]
+			last_index := strings.LastIndex(m1, " ")
+			if last_index > 0 {
+				m1 = msg[:last_index-1]
+				msg = msg[last_index+1:]
+				SLACK_RTM.SendMessage(SLACK_RTM.NewOutgoingMessage(m1, recipient))
+			} else {
+				SLACK_RTM.SendMessage(SLACK_RTM.NewOutgoingMessage("Message too long, truncating...\n", recipient))
+				SLACK_RTM.SendMessage(SLACK_RTM.NewOutgoingMessage(msg[:SLACK_MAX_LENGTH], recipient))
+			}
+		}
 		SLACK_RTM.SendMessage(SLACK_RTM.NewOutgoingMessage(msg, recipient))
 	}
 }
@@ -5521,10 +5664,26 @@ func serializeData() {
 	}
 }
 
+func slackChannelPeriodics() {
+	verbose(2, "Running slack channel periodics...")
+	for _, chInfo := range CHANNELS {
+		snowAlert(*chInfo)
+	}
+}
+
 func slackPeriodics() {
-	for _ = range time.Tick(PERIODICS * time.Minute) {
-		serializeData()
-		updateSlackChannels()
+	n := 0
+	for _ = range time.Tick(PERIODICS * time.Second) {
+		verbose(1, "Running slack periodics...")
+		go serializeData()
+		go slackChannelPeriodics()
+		/* Updating Slack channels is
+		 * expensive, so don't do this every round. */
+		if (n % 30 ==  0) {
+			go updateSlackChannels()
+			n = 0
+		}
+		n += 1
 	}
 }
 
@@ -5570,7 +5729,7 @@ func updateSeen(r Recipient, msg string) {
 		return
 	}
 
-	curses_re := regexp.MustCompile(`(sh[ia]t|motherfucker|piss|f+u+c+k+|cunt|cocksucker|tits)`)
+	curses_re := regexp.MustCompile(`(shit|motherfucker|piss|f+u+c+k+|cunt|cocksucker|tits)`)
 	curses_match := curses_re.FindAllString(msg, -1)
 
 	/* We don't keep track of priv messages, only public groupchat. */
@@ -5627,7 +5786,7 @@ func updateSeen(r Recipient, msg string) {
 			ch.SlackUsers[r.MentionName] = uInfo
 		}
 
-		CHANNELS[ch.Id] = ch
+		CHANNELS[ch.Name] = ch
 	}
 }
 
@@ -5644,8 +5803,13 @@ func usage(out io.Writer) {
 }
 
 func updateChannels() {
-	for _, ch := range CHANNELS {
-		verbose(2, "Updating channel info for channel #%s...", ch.Name)
+	for n, ch := range CHANNELS {
+		verbose(2, "Updating channel info for channel %s (#%s)...", n, ch.Name)
+		if (n != ch.Name) {
+			fmt.Fprintf(os.Stderr, "+++ dupe: %s (#%s)\n", n, ch.Name)
+			delete(CHANNELS, n)
+			continue
+		}
 		for t, v := range TOGGLES {
 			if len(ch.Toggles) == 0 {
 				ch.Toggles = map[string]bool{}
