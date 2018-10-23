@@ -128,10 +128,10 @@ var SLACK_CHANNELS = map[string]slack.Channel{}
 var CHANNELS = map[string]*Channel{}
 var COMMANDS = map[string]*Command{}
 var COUNTERS = map[string]map[string]int{
-			"commands" : map[string]int{},
-			"curses"   : map[string]int{},
-			"replies"  : map[string]int{},
-		}
+	"commands": map[string]int{},
+	"curses":   map[string]int{},
+	"replies":  map[string]int{},
+}
 
 var TOGGLES = map[string]bool{
 	"atnoyance":   true,
@@ -255,7 +255,6 @@ var THANKYOU = []string{
 	"_struts his stuff._",
 	"_takes a bow._",
 }
-
 
 var COOKIES []*http.Cookie
 var VERBOSITY int
@@ -482,7 +481,7 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 
 	rand.Seed(time.Now().UnixNano())
 	if len(args) > 0 && args == "chatter" {
-		var s = []string {
+		var s = []string{
 			fmt.Sprintf("Well, @%s, instead, you should probably", r.MentionName),
 			"A better idea:",
 			"Or perhaps",
@@ -527,7 +526,7 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 			"uniquely",
 			}
 
-	var verbs = []string {
+	var verbs = []string{
 			"actualize",
 			"administrate",
 			"aggregate",
@@ -903,7 +902,6 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 	return
 }
 
-
 func cmdChannels(r Recipient, chName, args string) (result string) {
 	var hipChatChannels []string
 	var slackChannels []string
@@ -933,7 +931,6 @@ func cmdChannels(r Recipient, chName, args string) (result string) {
 	}
 	return
 }
-
 
 func cmdCidr(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
@@ -1007,7 +1004,6 @@ func cmdCidr(r Recipient, chName, args string) (result string) {
 
 	return
 }
-
 
 func cmdClear(r Recipient, chName, args string) (result string) {
 	count := 24
@@ -1446,8 +1442,8 @@ func cmdInsult(r Recipient, chName, args string) (result string) {
 	at_mention := "<@" + CONFIG["slackID"] + ">"
 	if (len(args) > 0) &&
 		((strings.ToLower(args) == strings.ToLower(CONFIG["mentionName"])) ||
-		 (strings.ToLower(args) == "@" + strings.ToLower(CONFIG["mentionName"])) ||
-		 (strings.ToLower(args) == strings.ToLower(at_mention)) ||
+			(strings.ToLower(args) == "@" + strings.ToLower(CONFIG["mentionName"])) ||
+			(strings.ToLower(args) == strings.ToLower(at_mention)) ||
 			(args == "yourself") ||
 			(args == "me")) {
 		result = fmt.Sprintf("@%s: ", r.MentionName)
@@ -1487,9 +1483,9 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 	}
 
 	urlArgs := map[string]string{
-				"basic-auth-user" : CONFIG["jiraUser"],
-				"basic-auth-password" : CONFIG["jiraPassword"],
-			}
+		"basic-auth-user" : CONFIG["jiraUser"],
+		"basic-auth-password" : CONFIG["jiraPassword"],
+	}
 	ticket := strings.TrimSpace(strings.Split(args, " ")[0])
 	jiraUrl := fmt.Sprintf("%s%s", COMMANDS["jira"].How, ticket)
 	data := getURLContents(jiraUrl, urlArgs)
@@ -1583,13 +1579,13 @@ func cmdMan(r Recipient, chName, args string) (result string) {
 		section = url.QueryEscape(query[0])
 	}
 
-	cmd := url.QueryEscape(query[len(query) - 1])
+	cmd := url.QueryEscape(query[len(query)-1])
 
 	if len(section) > 0 {
 		result = getManResults(section, cmd)
 	} else {
 
-		sections := []string{ "1", "1p", "2", "2p", "3", "3p", "4", "4p", "5", "5p", "6", "6p", "7", "7p", "8", "8p" }
+		sections := []string{"1", "1p", "2", "2p", "3", "3p", "4", "4p", "5", "5p", "6", "6p", "7", "7p", "8", "8p"}
 
 		for _, section := range sections {
 			result = getManResults(section, cmd)
@@ -1605,7 +1601,6 @@ func cmdMan(r Recipient, chName, args string) (result string) {
 
 	return
 }
-
 
 func cmdMonkeyStab(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 || strings.EqualFold(args, CONFIG["mentionName"]) {
@@ -1626,7 +1621,7 @@ func cmdOid(r Recipient, chName, args string) (result string) {
 	oid := strings.TrimSpace(oids[0])
 
 	theUrl := fmt.Sprintf("%s%s", COMMANDS["oid"].How, oid)
-	urlArgs := map[string]string{ "ua" : "true" }
+	urlArgs := map[string]string{"ua": "true"}
 	data := getURLContents(theUrl, urlArgs)
 
 	info_key := ""
@@ -1741,7 +1736,7 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 	}
 
 	theUrl := URLS["opsgenie"] + "schedules"
-	urlArgs := map[string]string{ "Authorization" : "GenieKey " + key, }
+	urlArgs := map[string]string{"Authorization": "GenieKey " + key}
 	data := getURLContents(theUrl, urlArgs)
 
         var jsonResult map[string]interface{}
@@ -1934,6 +1929,7 @@ func cmdPraise(r Recipient, chName, args string) (result string) {
 				}
 			}
 		}
+	}
 
 		var praise []int
 		for count := range heroes {
@@ -1987,7 +1983,6 @@ func cmdPraise(r Recipient, chName, args string) (result string) {
 	return
 }
 
-
 func cmdPwgen(r Recipient, chName, args string) (result string) {
 	arguments := strings.Fields(args)
 	if len(arguments) > 3 {
@@ -2027,7 +2022,6 @@ func cmdPwgen(r Recipient, chName, args string) (result string) {
 	}
 	return
 }
-
 
 func cmdQuote(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
@@ -2168,7 +2162,7 @@ func cmdRoom(r Recipient, chName, args string) (result string) {
 				return
 			} else {
 				if strings.Contains(lc, lroom) {
-					candidates = append(candidates, &roomTopic{ aRoom.Name, aRoom.Topic})
+					candidates = append(candidates, &roomTopic{aRoom.Name, aRoom.Topic})
 				}
 			}
 		}
@@ -2194,7 +2188,7 @@ func cmdRoom(r Recipient, chName, args string) (result string) {
 				result += fmt.Sprintf("https://%s/messages/%s/\n", CONFIG["slackService"], lroom)
 				return
 			} else if strings.Contains(lc, lroom) {
-				candidates = append(candidates, &roomTopic{ ch.Name, ch.Topic.Value})
+				candidates = append(candidates, &roomTopic{ch.Name, ch.Topic.Value})
 			}
 		}
 	}
@@ -3039,7 +3033,6 @@ func cmdWhois(r Recipient, chName, args string) (result string) {
 	out, _ := runCommand(fmt.Sprintf("whois %s", args))
 	data := string(out)
 
-
 	/* whois formatting is a mess; different whois servers return
 	 * all sorts of different information in all sorts of different
 	 * formats. We'll try to catch some common ones here. :-/ */
@@ -3047,12 +3040,12 @@ func cmdWhois(r Recipient, chName, args string) (result string) {
 	var format string
 	found := false
 
-	formatGuesses := map[*regexp.Regexp]string {
-		regexp.MustCompile("(?i)Registry Domain ID:")               : "common",
+	formatGuesses := map[*regexp.Regexp]string{
+		regexp.MustCompile("(?i)Registry Domain ID:"):                "common",
 		regexp.MustCompile("(?i)%% This is the AFNIC Whois server."): "afnic",
-		regexp.MustCompile("(?i)% Copyright.* by DENIC")            : "denic",
-		regexp.MustCompile("(?i)The EDUCAUSE Whois database")       : "educause",
-		regexp.MustCompile("(?i)for .uk domain names")              : "uk",
+		regexp.MustCompile("(?i)% Copyright.* by DENIC"):             "denic",
+		regexp.MustCompile("(?i)The EDUCAUSE Whois database"):        "educause",
+		regexp.MustCompile("(?i)for .uk domain names"):               "uk",
 	}
 
 	for p, f := range formatGuesses {
@@ -3263,7 +3256,7 @@ func cmdWiki(r Recipient, chName, args string) (result string) {
 	urls := jsonData[3]
 
 	if len(sentences.([]interface{})) < 1 {
-		result= fmt.Sprintf("No Wikipedia page found for '%s'.", args)
+		result = fmt.Sprintf("No Wikipedia page found for '%s'.", args)
 		return
 	}
 
@@ -3325,7 +3318,7 @@ func cmdWtf(r Recipient, chName, args string) (result string) {
 				}
 			}
 		} else {
-fmt.Fprintf(os.Stderr, "%v\n", err)
+			fmt.Fprintf(os.Stderr, "%v\n", err)
 		}
 	}
 
@@ -3381,7 +3374,6 @@ func cmdXkcd(r Recipient, chName, args string) (result string) {
 	return
 }
 
-
 /*
  * General Functions
  */
@@ -3406,7 +3398,6 @@ func catchPanic() {
 	}
 }
 
-
 func chatterAtnoyance(msg string, ch *Channel, r Recipient) (result string) {
 	if strings.Contains(msg, "<!channel>") {
 		if slackChannel, err := SLACK_CLIENT.GetChannelInfo(ch.Id); err == nil {
@@ -3420,7 +3411,6 @@ func chatterAtnoyance(msg string, ch *Channel, r Recipient) (result string) {
 	}
 	return
 }
-
 
 func chatterDrWho(msg string) (result string) {
 	anyreply := []string{
@@ -4673,7 +4663,6 @@ func getChannelInfo(id string) (info string) {
 	return
 }
 
-
 func getManResults(section, cmd string) (result string) {
 	nsection := section
 	if strings.HasSuffix(section, "p") {
@@ -4722,7 +4711,6 @@ func getManResults(section, cmd string) (result string) {
 
 	return
 }
-
 
 func getRecipientFromMessage(mfrom string, chatType string) (r Recipient) {
 	r.ChatType = chatType
@@ -4813,7 +4801,7 @@ func getSortedKeys(hash map[string]int, rev bool) (sorted []string) {
  *   set the given 'key=value' headers
  */
 func getURLContents(givenUrl string, args map[string]string) (data []byte) {
-	verbose(3, "Fetching %s)...", givenUrl)
+	verbose(3, "Fetching %s...", givenUrl)
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to initialize cookie jar: %s\n", err)
@@ -4859,8 +4847,8 @@ func getURLContents(givenUrl string, args map[string]string) (data []byte) {
 		return
 	}
 
-	var ba_user string;
-	var ba_pass string;
+	var ba_user string
+	var ba_pass string
 
 	for key, val := range args {
 		if key == "ua" {
@@ -4904,7 +4892,7 @@ func incrementCounter(category, counter string) {
 		}
 		COUNTERS[category] = categoryCounters
 	} else {
-		COUNTERS[category] = map[string]int{ counter : 1 }
+		COUNTERS[category] = map[string]int{counter: 1}
 	}
 }
 
@@ -4941,7 +4929,7 @@ func leave(r Recipient, channelFound bool, msg string, command bool) {
 		} else if r.ChatType == "slack" {
 			delete(CHANNELS, r.ReplyTo)
 
-			msg := "Bots can't leave Slack channels.\n"
+			msg := "Bots can't leave Slack channels - you'd have to find a Slack admin to kick me out.\n"
 			msg += "But I'm going to ignore everything in this channel going forward.\n"
 			msg += "If you do miss me terribly much, @-mention me and I'll start paying attention in here again, ok?\n\n"
 			rand.Seed(time.Now().UnixNano())
@@ -4949,7 +4937,7 @@ func leave(r Recipient, channelFound bool, msg string, command bool) {
 			ch, found := getChannel(r.ChatType, r.ReplyTo)
 			if found {
 				delete(CHANNELS, ch.Name)
-				msg += fmt.Sprintf("\n_pretends to have left %s._", ch.Name)
+				msg += fmt.Sprintf("\n_pretends to have left #%s._", ch.Name)
 			}
 			reply(r, msg)
 		}
@@ -5146,7 +5134,7 @@ func processChatter(r Recipient, msg string, forUs bool) {
 	 * is not toggled off. */
 	mentioned_re := regexp.MustCompile(fmt.Sprintf("(?i)(^( *|yo,? ?|hey,? ?)%s[,:]?)|(,? *%s *[.?!]?$)|(.* *%s *[.?!].*)", yo, yo, yo))
 	mentioned := mentioned_re.MatchString(msg)
-	if strings.Contains(msg, "@" + CONFIG["mentionName"]) {
+	if strings.Contains(msg, "@"+CONFIG["mentionName"]) {
 		mentioned = true
 	}
 	if r.ChatType == "slack" {
@@ -5415,7 +5403,6 @@ func processMessage(r Recipient, msg string) {
 	}
 }
 
-
 func processSlackChannelJoin(ev *slack.ChannelJoinedEvent) {
 	jbotDebug(fmt.Sprintf("Join: %v\n", ev))
 }
@@ -5446,14 +5433,13 @@ func processSlackInvite(r Recipient, name string, msg *slack.MessageEvent) {
 		ch.Toggles[t] = v
 	}
 
-	if strings.Contains(msg.Text, "<@" + CONFIG["slackID"] + ">") {
+	if strings.Contains(msg.Text, "<@"+CONFIG["slackID"]+">") {
 		verbose(2, "I was invited into Slack '%s' (%s) by '%s'.", ch.Name, ch.Id, ch.Inviter)
 		CHANNELS[ch.Name] = &ch
 		rand.Seed(time.Now().UnixNano())
 		reply(r, HELLO[rand.Intn(len(HELLO))])
 	}
 }
-
 
 func processSlackMessage(msg *slack.MessageEvent) {
 	jbotDebug(fmt.Sprintf("\nMessage: |%v|", msg))
@@ -5517,10 +5503,9 @@ func processSlackMessage(msg *slack.MessageEvent) {
 	processMessage(r, txt)
 }
 
-
 func randomLineFromUrl(theUrl string, useBy bool) (line string) {
 	rand.Seed(time.Now().UnixNano())
-	urlArgs := map[string]string{ "by" : "false" }
+	urlArgs := map[string]string{"by": "false"}
 	if useBy {
 		urlArgs["by"] = "true"
 	}
@@ -5623,7 +5608,7 @@ func runCommand(cmd ...string) (out []byte, rval int) {
 		if command != nil && command.ProcessState != nil &&
 			command.ProcessState.Exited() != true {
 			response := fmt.Sprintf("Sorry, I had to kill your '%s' command.\n", cmd)
-fmt.Fprintf(os.Stderr, ":: |%v|\n", command)
+			fmt.Fprintf(os.Stderr, ":: |%v|\n", command)
 			if err := command.Process.Kill(); err != nil {
 				response += fmt.Sprintf("Unable to kill your process: %s", err)
 			}
@@ -5679,7 +5664,7 @@ func slackPeriodics() {
 		go slackChannelPeriodics()
 		/* Updating Slack channels is
 		 * expensive, so don't do this every round. */
-		if (n % 30 ==  0) {
+		if n%30 == 0 {
 			go updateSlackChannels()
 			n = 0
 		}
@@ -5714,7 +5699,6 @@ func updateSlackChannels() {
 		}
 	}
 }
-
 
 func updateRoster(users []*hipchat.User) {
 	for _, user := range users {
@@ -5790,7 +5774,6 @@ func updateSeen(r Recipient, msg string) {
 	}
 }
 
-
 func usage(out io.Writer) {
 	usage := `Usage: %v [-DVhv] [-c configFile]
 	-D             enable debugging output
@@ -5805,7 +5788,7 @@ func usage(out io.Writer) {
 func updateChannels() {
 	for n, ch := range CHANNELS {
 		verbose(2, "Updating channel info for channel %s (#%s)...", n, ch.Name)
-		if (n != ch.Name) {
+		if n != ch.Name {
 			fmt.Fprintf(os.Stderr, "+++ dupe: %s (#%s)\n", n, ch.Name)
 			delete(CHANNELS, n)
 			continue
@@ -5831,7 +5814,7 @@ func verbose(level int, format string, v ...interface{}) {
 		for i := 0; i < level; i++ {
 			fmt.Fprintf(os.Stderr, "=")
 		}
-		fmt.Fprintf(os.Stderr, "> " + format + "\n", v...)
+		fmt.Fprintf(os.Stderr, "> "+format+"\n", v...)
 	}
 }
 
