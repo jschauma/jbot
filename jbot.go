@@ -1442,7 +1442,7 @@ func cmdInsult(r Recipient, chName, args string) (result string) {
 	at_mention := "<@" + CONFIG["slackID"] + ">"
 	if (len(args) > 0) &&
 		((strings.ToLower(args) == strings.ToLower(CONFIG["mentionName"])) ||
-			(strings.ToLower(args) == "@" + strings.ToLower(CONFIG["mentionName"])) ||
+			(strings.ToLower(args) == "@"+strings.ToLower(CONFIG["mentionName"])) ||
 			(strings.ToLower(args) == strings.ToLower(at_mention)) ||
 			(args == "yourself") ||
 			(args == "me")) {
@@ -1483,8 +1483,8 @@ func cmdJira(r Recipient, chName, args string) (result string) {
 	}
 
 	urlArgs := map[string]string{
-		"basic-auth-user" : CONFIG["jiraUser"],
-		"basic-auth-password" : CONFIG["jiraPassword"],
+		"basic-auth-user":     CONFIG["jiraUser"],
+		"basic-auth-password": CONFIG["jiraPassword"],
 	}
 	ticket := strings.TrimSpace(strings.Split(args, " ")[0])
 	jiraUrl := fmt.Sprintf("%s%s", COMMANDS["jira"].How, ticket)
@@ -1681,6 +1681,55 @@ func cmdOid(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdOnion(r Recipient, chName, args string) (result string) {
+	search := false
+	theUrl := COMMANDS["onion"].How + "rss"
+
+	if len(args) > 0 {
+		theUrl = fmt.Sprintf("%ssearch?q=%s", COMMANDS["onion"].How, url.QueryEscape(args))
+		search = true
+	}
+
+	data := getURLContents(theUrl, nil)
+
+	if !search {
+		items := strings.Split(string(data), "<item>")
+		rss_re := regexp.MustCompile(`^<title>(.*)</title><link>(.*)</link>`)
+		for _, item := range items {
+			m := rss_re.FindStringSubmatch(item)
+			if len(m) > 0 {
+				result += m[1] + " - " + m[2] + "\n"
+				return
+			}
+		}
+	}
+
+	found := false
+	next := false
+	search_re := regexp.MustCompile(`href="(.*)" rel="nofollow"><div>([^<]+)<`)
+	for _, line := range strings.Split(string(data), "js_link") {
+		if strings.Contains(line, ">Search<") {
+			found = true
+			continue
+		}
+		if strings.Contains(line, ">News in Brief<") {
+			next = true
+			continue
+		}
+		if found && next {
+			m := search_re.FindStringSubmatch(line)
+			if len(m) > 0 {
+				result = m[2] + " - " + m[1]
+				return
+			}
+		}
+	}
+
+	result = fmt.Sprintf("No results found on '%s'.", theUrl)
+	return
+}
+
+
 func cmdOncall(r Recipient, chName, args string) (result string) {
 	oncall := args
 	oncall_source := "user input"
@@ -1834,6 +1883,7 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 		} else if strings.Contains(strings.ToLower(tname), strings.ToLower(wantedName)) {
 			candidates = append(candidates, tname)
 	}
+	}
 
 	if !schedule_found && len(candidates) > 0 {
 		if len(candidates) == 1 && strings.EqualFold(wantedName, candidates[0]) &&
@@ -1929,7 +1979,6 @@ func cmdPraise(r Recipient, chName, args string) (result string) {
 				}
 			}
 		}
-	}
 
 		var praise []int
 		for count := range heroes {
@@ -3362,12 +3411,9 @@ func cmdXkcd(r Recipient, chName, args string) (result string) {
 				result = dehtmlify(m[1])
 				break
 			}
-		} else {
-			if n == 3 {
+		} else if n == 2 {
 				xkcd := strings.Split(line, " ")[0]
 				result = "https://xkcd.com/" + xkcd + "/"
-				break
-			}
 		}
 	}
 
@@ -4180,6 +4226,11 @@ func createCommands() {
 		"show who's oncall",
 		"Service Now & OpsGenie",
 		"!oncall [<group>]",
+		nil}
+	COMMANDS["onion"] = &Command{cmdOnion,
+		"get your finest news headlines",
+		"https://www.theonion.com/",
+		"!onion [<term>]",
 		nil}
 	COMMANDS["ping"] = &Command{cmdPing,
 		"try to ping hostname",
@@ -5826,6 +5877,7 @@ func wasInsult(msg string) (result bool) {
 		regexp.MustCompile(fmt.Sprintf("(?i)@?%s su(cks|x)", CONFIG["mentionName"])),
 		regexp.MustCompile("(?i)asshole|bitch|dickhead"),
 		regexp.MustCompile("(?i)dam+n? (yo)?u"),
+		regexp.MustCompile(fmt.Sprintf("(?i)(be )?quiet @?%s", CONFIG["mentionName"])),
 		regexp.MustCompile("(?i)shut ?(the fuck )?up"),
 		regexp.MustCompile("(?i)(screw|fuck) (yo)u"),
 		regexp.MustCompile("(?i)(piss|bugger) ?off"),
