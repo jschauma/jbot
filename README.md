@@ -153,6 +153,41 @@ E.g.:
 16:18 <jbot> energistically reconceptualize real-time intellectual capital
 ```
 
+#### !cert -- display information about the x509 cert found at the given hostname
+
+This command allows you to display information about
+the x509 certificate from the given host.</p>
+
+You can specify a hostname or an IP address followed
+optionally by a port.  If a port is not provided, jbot
+will try port 443.  You can also provide an optional
+SNI name as well as ask for the full
+chain:
+```
+16:22 <@jans> !cert www.yahoo.com
+16:22 < jbot> Serial Number: 08:88:b1:ad:2a:59:33:10:59:3f:47:56:5a:5a:5a:4a
+Subject      : CN=*.www.yahoo.com,O=Yahoo Holdings\, Inc.,L=Sunnyvale,ST=California,C=US
+Issuer       : CN=DigiCert SHA2 High Assurance Server CA,OU=www.digicert.com,O=DigiCert Inc,C=US
+Validity     :
+   Not Before: 2018-08-13 00:00:00 +0000 UTC
+   Not After : 2019-02-14 12:00:00 +0000 UTC
+44 SANs:
+...
+16:22 <@jans> !cert www.yahoo.com chain
+16:22 < jbot> Certificate 0:
+Serial Number: 08:88:b1:ad:2a:59:33:10:59:3f:47:56:5a:5a:5a:4a
+Subject      : CN=*.www.yahoo.com,O=Yahoo Holdings\, Inc.,L=Sunnyvale,ST=California,C=US
+...
+Certificate 1:
+Serial Number: 04:e1:e7:a4:dc:5c:f2:f3:6d:c0:2b:42:b8:5d:15:9f
+Subject      : CN=DigiCert SHA2 High Assurance Server CA,OU=www.digicert.com,O=DigiCert Inc,C=US
+...
+16:22 <@jans> !cert badssl.com extended-validation.badssl.com
+16:22 < jbot> Serial Number: 03:6a:f1:d4:8f:7e:5f:22:2a:8c:45:25:f0:12:c9:e1
+Subject      : SERIALNUMBER=C2543436,CN=extended-validation.badssl.com,O=Mozilla Foundation,L=Mountain View,ST=California,C=US
+...
+
+```
 
 #### !channels -- display channels I'm in
 

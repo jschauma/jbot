@@ -46,6 +46,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
@@ -902,6 +903,113 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 	return
 }
 
+func cmdCert(r Recipient, chName, args string) (result string) {
+	names := strings.Split(args, " ")
+	if len(args) < 1 || len(names) > 3 {
+		result = "Usage: " + COMMANDS["cert"].Usage
+		return
+	}
+
+	names[0] = strings.TrimPrefix(names[0], "https://")
+	names[0] = strings.TrimSuffix(names[0], "/")
+
+	ipv6 := false
+	ipv6_re := regexp.MustCompile(`(?i)^\[?([a-f0-9:]+)\]?(:[0-9]+)?$`)
+	m := ipv6_re.FindStringSubmatch(names[0])
+	if len(m) > 0 {
+		ipv6 = true
+	} else {
+		name_port_re := regexp.MustCompile(`(?i)^([^: ]+)(:[0-9]+)?$`)
+		m = name_port_re.FindStringSubmatch(names[0])
+		if len(m) < 1 {
+			result = "Invalid argument. Try an FQDN followed by an optional port.\n"
+			result += "For example: www.yahoo.com:443\n"
+			return
+		}
+	}
+
+	if len(m[2]) < 1 {
+		if ipv6 {
+			names[0] = fmt.Sprintf("[%s]:443", names[0])
+		} else {
+			names[0] += ":443"
+		}
+	}
+
+	/* This call is intended to show information
+	 * about the cert, even if the cert is not
+	 * valid, so here we actually ignore cert
+	 * errors for once. */
+	config := &tls.Config{InsecureSkipVerify: true}
+
+	chain := false
+	if len(names) > 1 {
+		if names[1] == "all" || names[1] == "chain" {
+			chain = true
+		} else {
+			config = &tls.Config{InsecureSkipVerify: true, ServerName: names[1]}
+		}
+
+		if len(names) == 3 {
+			chain = true
+		}
+	}
+
+	conn, err := tls.Dial("tcp", names[0], config)
+	if err != nil {
+		result = fmt.Sprintf("Unable to make a TLS connection to '%s'.\n", names[0])
+		return
+	}
+
+	for n, c := range conn.ConnectionState().PeerCertificates {
+		if chain {
+			result += fmt.Sprintf("Certificate %d:\n", n)
+		}
+		result += "```\n"
+		result += fmt.Sprintf("Serial Number: ")
+		hex := fmt.Sprintf("%x", c.SerialNumber)
+		if len(hex)%2 != 0 {
+			hex = "0" + hex
+		}
+		for i, b := range hex {
+			if i > 0 && i%2 == 0 {
+				result += fmt.Sprintf(":")
+			}
+			result += fmt.Sprintf("%s", string(b))
+		}
+		result += fmt.Sprintf("\n")
+
+		result += fmt.Sprintf("Subject      : %s\n", c.Subject)
+		result += fmt.Sprintf("Issuer       : %s\n", c.Issuer)
+
+		if c.Subject.String() == c.Issuer.String() {
+			result += "Note         : SELF-SIGNED\n"
+		}
+
+		result += "Validity     : "
+		now := time.Now()
+		if now.Before(c.NotBefore) {
+			result += "NOT YET"
+		} else if now.After(c.NotAfter) {
+			result += "EXPIRED"
+		}
+		result += "\n"
+
+		result += fmt.Sprintf("   Not Before: %s\n", c.NotBefore)
+		result += fmt.Sprintf("   Not After : %s\n", c.NotAfter)
+		if len(c.DNSNames) > 0 {
+			result += fmt.Sprintf("%d SANs:\n%s\n", len(c.DNSNames), strings.Join(c.DNSNames, " "))
+		}
+		result += "```\n"
+
+		if !chain {
+			break
+		}
+	}
+
+	return
+}
+
 func cmdChannels(r Recipient, chName, args string) (result string) {
 	var hipChatChannels []string
 	var slackChannels []string
@@ -1269,7 +1377,7 @@ func cmdGiphy(r Recipient, chName, args string) (result string) {
 	status := giphyJson["meta"].(map[string]interface{})["status"].(float64)
 
 	if status != 200 {
-		fmt.Fprintf(os.Stderr, "+++ giphy return status %d: %v\n", status, giphyJson)
+		fmt.Fprintf(os.Stderr, "+++ giphy return status %f: %v\n", status, giphyJson)
 		result = fmt.Sprintf("Giphy responded with a non-200 status code!")
 		return
 	}
@@ -1728,7 +1836,6 @@ func cmdOnion(r Recipient, chName, args string) (result string) {
 	result = fmt.Sprintf("No results found on '%s'.", theUrl)
 	return
 }
-
 
 func cmdOncall(r Recipient, chName, args string) (result string) {
 	oncall := args
@@ -3952,7 +4059,7 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 		return
 	}
 
-	trump_re := regexp.MustCompile(`(?i)(hillary|lincoln|mexican border|ivanka|melania|rosie|health care|border security|worst president|#maga|tax evasion|impeach|major asshole|sexist pig|pennsylvania avenue)`)
+	trump_re := regexp.MustCompile(`(?i)(hillary|lincoln|mexican border|ivanka|melania|rosie o'donnel|health care|border security|worst president|#maga|tax evasion|impeach|major asshole|sexist pig|pennsylvania avenue)`)
 	if trump_re.MatchString(msg) && !isThrottled("trump", ch) {
 		replies := []string{
 			"They don't write good. They don't know how to write good.",
@@ -3978,7 +4085,14 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 
 	fnord_re := regexp.MustCompile(`(?i)fnord`)
 	if fnord_re.MatchString(msg) && !isThrottled("fnord", ch) {
-		result = "IF YOU DON'T SEE THE FNORD IT CAN'T EAT YOU"
+		replies := []string{
+			"Your heart will remain calm. Your adrenalin gland will remain calm. Calm, all-over calm.",
+			"You will not panic. You will look at the fnord and see it. You will not evade it or black it out. You will stay calm and face it.",
+			"IF YOU DON'T SEE THE FNORD IT CAN'T EAT YOU",
+			"DON'T SEE THE FNORD, DON'T SEE THE FNORD...",
+			"From Nothing ORiginates Discord",
+		}
+		result = replies[rand.Intn(len(replies))]
 	}
 
 	return
@@ -4117,6 +4231,11 @@ func createCommands() {
 		"builtin, but inspired from http://www.atrixnet.com/bs-generator.html",
 		"!bs",
 		nil}
+	COMMANDS["cert"] = &Command{cmdCert,
+		"display information about the x509 cert found at the given hostname",
+		"crypto/tls",
+		"!cert fqdn [<sni>] [chain]",
+		[]string{"certs"}}
 	COMMANDS["channels"] = &Command{cmdChannels,
 		"display channels I'm in",
 		"builtin",
@@ -4298,7 +4417,7 @@ func createCommands() {
 		"show current throttles",
 		"builtin",
 		"!throttle -- show all throttles in this channel\n" +
-			fmt.Sprintf("!throttle <something>  -- set throttle for <something> to %g seconds\n", DEFAULT_THROTTLE) +
+			fmt.Sprintf("!throttle <something>  -- set throttle for <something> to %d seconds\n", DEFAULT_THROTTLE) +
 			"!throttle <something> <seconds> -- set throttle for <something> to <seconds>\n" +
 			"Note: I will happily let you set throttles I don't know or care about.",
 		nil}
@@ -4919,7 +5038,7 @@ func getURLContents(givenUrl string, args map[string]string) (data []byte) {
 
 	response, err := client.Do(request)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to GET '%s': $s\n", givenUrl, err)
+		fmt.Fprintf(os.Stderr, "Unable to GET '%s': %s\n", givenUrl, err)
 		return
 	}
 
@@ -5108,7 +5227,7 @@ func parseConfig() {
 			for t, v := range TOGGLES {
 				ch.Toggles[t] = v
 			}
-			jbotDebug(fmt.Sprintf("%q", ch))
+			jbotDebug(fmt.Sprintf("%v", ch))
 			CHANNELS[ch.Name] = &ch
 		}
 	}
@@ -5545,12 +5664,8 @@ func processSlackMessage(msg *slack.MessageEvent) {
 	 * so here we only undo the simplest cases to
 	 * allow users to pass hostnames. */
 	txt := msg.Text
-	unlink_re := regexp.MustCompile("(<http://(.+)\\|(.+)>)")
-	if m := unlink_re.FindStringSubmatch(msg.Text); len(m) > 0 {
-		if m[2] == m[3] {
-			txt = unlink_re.ReplaceAllString(msg.Text, m[3])
-		}
-	}
+	unlink_re := regexp.MustCompile("(<https?://([^|]+)\\|([^>]+)>)")
+	txt = unlink_re.ReplaceAllString(txt, "${3}")
 	processMessage(r, txt)
 }
 
