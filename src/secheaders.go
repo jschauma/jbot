@@ -139,13 +139,13 @@ func init() {
 		[]string{"sec-headers"}}
 }
 
-func cmdSecheaders(r Recipient, chName, args string) (result string) {
+func cmdSecheaders(r Recipient, chName string, args []string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["secheaders"].Usage
 		return
 	}
 
-	u := args
+	u := args[0]
 	if !strings.HasPrefix(u, "http") {
 		u = "https://" + u
 	}

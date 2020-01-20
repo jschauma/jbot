@@ -23,20 +23,21 @@ func init() {
 		nil}
 }
 
-func cmdCt(r Recipient, chName, args string) (result string) {
+func cmdCt(r Recipient, chName string, args []string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["ct"].Usage
 		return
 	}
 
-	args = strings.TrimPrefix(args, "https://")
-	args = strings.TrimSuffix(args, "/")
+	input := args[0]
+	input = strings.TrimPrefix(input, "https://")
+	input = strings.TrimSuffix(input, "/")
 
 	theURL := COMMANDS["ct"].How
-	if !strings.Contains(args, "=") {
-		theURL += "q=" + url.QueryEscape(args)
+	if !strings.Contains(input, "=") {
+		theURL += "q=" + url.QueryEscape(input)
 	} else {
-		kv := strings.SplitN(args, "=", 2)
+		kv := strings.SplitN(input, "=", 2)
 		theURL += url.QueryEscape(kv[0]) + "=" + url.QueryEscape(kv[1])
 	}
 

@@ -12,14 +12,15 @@
  * configuration file with suitable values.  The
  * following configuration values are required:
  *
+ * fullName        = how the bot presents itself
+ * mentionName     = to which name the bot responds to
+ *
  * For HipChat:
  *   hcPassword    = the HipChat password of the bot user
  *     OR
  *   hcOauthToken  = the HipChat Oauth token for the bot user
  *   hcService     = the HipChat company prefix, e.g. <foo>.hipchat.com
  *   hcJabberID    = the HipChat / JabberID of the bot user
- *   fullName      = how the bot presents itself
- *   mentionName   = to which name the bot responds to
  *
  * For Slack:
  *   slackService  = the Slack service name, e.g. <foo>.slack.com
@@ -66,7 +67,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
+	"runtime"
 	"runtime/debug"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,6 +79,7 @@ import (
 
 import (
 	"github.com/daneharrigan/hipchat"
+	"github.com/google/shlex"
 	"github.com/nlopes/slack"
 )
 
@@ -129,6 +133,8 @@ var CONFIG = map[string]string{
 	"slackToken":           "",
 	"SMTP":                 "",
 	"timezonedbApiKey":     "",
+	"x509Cert":             "",
+	"x509Key":              "",
 }
 
 var SECRETS = []string{
@@ -173,13 +179,14 @@ var TOGGLES = map[string]bool{
 var URLS = map[string]string{
 	"insults": "http://localhost/quips",
 	"jbot":    "https://github.com/jschauma/jbot/",
-	"jira":    "https://<yourjiraurlhere>",
 	"parrots": "http://localhost/parrots",
 	"praise":  "http://localhost/praise",
-	"pwgen":   "https://www.netmeister.org/pwgen/",
+	"pwgen":   "https://www.netmeister.org/pwgen/"
 	"speb":    "http://localhost/speb",
 	"trivia":  "http://localhost/trivia",
 }
+
+var ALERTS = map[string]string{}
 
 var COOKIES []*http.Cookie
 var VERBOSITY int
@@ -206,9 +213,10 @@ type Channel struct {
 	SlackUsers   map[string]UserInfo
 	Settings     map[string]string
 	Phishy       *PhishCount
+	Verified     bool
 }
 
-type CommandFunc func(Recipient, string, string) string
+type CommandFunc func(Recipient, string, []string) string
 
 type Command struct {
 	Call    CommandFunc
@@ -249,14 +257,121 @@ type Recipient struct {
  * Commands
  */
 
-func cmdAsn(r Recipient, chName, args string) (result string) {
-	input := strings.Split(args, " ")
-	if len(args) < 1 || len(input) != 1 {
+func addressedToTheBot(in string) bool {
+	at_mention := "<@" + CONFIG["slackID"] + ">"
+	if strings.EqualFold(in, CONFIG["mentionName"]) ||
+		strings.EqualFold(in, "@"+CONFIG["mentionName"]) ||
+		strings.EqualFold(in, at_mention) ||
+		in == "yourself" {
+		return true
+	}
+
+	return false
+}
+
+func cmdAlerts(r Recipient, chName string, args []string) (result string) {
+	chInfo, found := CHANNELS[chName]
+	if !found {
+		result = "This command only works in a channel."
+		return
+	}
+
+	if len(args) < 1 {
+		result = "Alerts can be used to get periodic notifications about certain events.\n"
+		result += "You currently have "
+		currentSettings := ""
+		for alert, _ := range ALERTS {
+			alertSetting, found := chInfo.Settings[alert]
+			if found {
+				currentSettings += fmt.Sprintf("%s=%s\n", alert, alertSetting)
+			}
+		}
+		if len(currentSettings) > 0 {
+			result += "the following alerts set:\n"
+			result += currentSettings + "\n"
+		} else {
+			result += "no alerts set.\n"
+		}
+		result += "\nYou can also inspect your alert settings via '!set'.\n"
+		result += "For each alert, there is an 'alert-counter' in your settings.\n"
+		result += "If you want to trigger the alert to be run on the next minute, you can '!unset <alert>-counter'.\n\n"
+		result += "The following alerts are possible:\n"
+		var keys []string
+		for k, _ := range ALERTS {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			result += "- " + k + "\n"
+		}
+		result += "To learn more about one of them, run '!alerts <alert-name>'.\n"
+		result += "\nFinally, to erase an alert, use '!unset <alert>'.\n"
+		return
+	}
+
+	if _, found := ALERTS[args[0]]; !found {
+		result = fmt.Sprintf("No such alert: '%s'. Try just '!alerts'.", args[0])
+		return
+	}
+
+	switch args[0] {
+	case "cmr-alert":
+		result = "If you set the 'cmr-alert' settting in your channel, I will look for upcoming or ongoing Change Requests (CHG) in Service Now (aka Change Management Requests or CMRs).\n" +
+			"The format of the setting is '<num>[,<property>|all[,ongoing|all]].\n" +
+			"'<num>' takes a different meaning whether you're looking for upcoming or ongoing CMRs.\n" +
+			"By default, I will look for upcoming CMRs. In that case, '<num>' can be:\n" +
+			"<num>   -- the number in minutes in the future until when I should search for upcoming CMRs\n" +
+			"<num>h  -- the number in hours in the future until when I should search for upcoming CMRs\n" +
+			"<num>d  -- the number in days in the future until when I should search for upcoming CMRs\n\n" +
+			"If you do not specify a property, or the property field is 'all', then I will search for CMRs for all properties.\n\n" +
+			"If you specify a third third field, then I will look for ongoing CMRs.\n" +
+			"An ongoing CMR is one with an Actual Start Date in the past and no Actual End Date.\n" +
+			"When searching for ongoing CMRs, the <num> field is the interval in minutes in which I will perform the search.\n\n" +
+			"Thus, you can set an alert for CMRs like so:\n" +
+			"'!set cmr-alert=1h' would cause me to look for any CMRs coming up in an hour.\n" +
+			"        (This is equivalent to running the command '!cmrs' manually every hour.)\n" +
+			"'!set cmr-alert=1d,PE-UDB' would cause me to look for any CMRs for the property PE-UDB coming up in the next day.\n" +
+			"        (This is equivalent to running the command '!cmrs 1d PE-UDB' manually once a day.)\n" +
+			"'!set cmr-alert=30,PE-Index,ongoing' would cause me to look for ongoing CMRs for the property 'PE-Index' every 30 minutes.\n" +
+			"        (This is equivalent to running the command '!cmrs ongoing PE-Index' manually every 30 minutes.)\n" +
+			"'!set cmr-alert=1h,all,ongoing' would cause me to look for all ongoing CMRs once an hour.\n" +
+			"        (This is equivalent to running the command '!cmrs ongoing' manually every 30 hour.)\n"
+
+	case "snow-alert":
+		result = "If you set the 'snow-alert' settting in your channel, I will fetch Incident Service-Now tickets on a periodic basis.\n" +
+			"The format of the setting is 'n[,<property>].\n" +
+			"'n' is the interval in minutes after which I will check for new incidents.\n" +
+			"If you specified a 'property'¸ then I will only display new incidents for that property only.\n" +
+			"Thus, you can set an alert for new incident tickets like so:\n" +
+			"'!set snow-alert=1' would cause me to look for new incident tickets for any property every minute.\n" +
+			"'!set snow-alert=10,AdvDataHighway.US' would cause me to look for new tickets for the AdvDataHighway.US property every 10 minutes.\n"
+
+	case "jira-alert":
+		if len(args) == 1 || args[1] == "help" {
+			result = "If you set the 'jira-alert' setting in your channel, I will run the given filter and display matching tickets on a periodic basis.\n" +
+				"The format of the setting is 'n,<filterid>.\n" +
+				"'n' is the interval in minutes after which I will run the jira query.\n" +
+				"'filterid' is the Jira filter ID I should run\n" +
+				"This requires you to have defined your Jira search as a public filter.\n" +
+				"\nYou can set multiple alerts by specifying multiple 'n,<filterId>' pairs separated by semicolons.\n" +
+				"For example, to run filter 1234 every 5 minutes and filter 9876 every 15 minutes:\n" +
+				"!set jira-alert=5,1234;15,9876\n" +
+				"\nTo display the names and URLs of the currently set filters, run '!alerts jira-alert info'.\n"
+		} else if args[1] == "info" {
+			jiraAlert(*chInfo, true)
+		}
+	}
+
+	return
+}
+
+func cmdAsn(r Recipient, chName string, args []string) (result string) {
+	if len(args) != 1 {
 		result = "Usage: " + COMMANDS["asn"].Usage
 		return
 	}
 
-	arg := input[0]
+	arg := args[0]
 	number_re := regexp.MustCompile(`(?i)^(asn?)?([0-9]+)$`)
 	m := number_re.FindStringSubmatch(arg)
 	if len(m) > 0 {
@@ -285,17 +400,17 @@ func cmdAsn(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdBacon(r Recipient, chName, args string) (result string) {
+func cmdBacon(r Recipient, chName string, args []string) (result string) {
 	pic := false
 	query := "bacon"
 	if len(args) > 0 {
-		query += " " + args
+		query += " " + strings.Join(args, " ")
 		pic = true
 	}
 
 	rand.Seed(time.Now().UnixNano())
 	if pic || rand.Intn(4) == 0 {
-		result = cmdImage(r, chName, query)
+		result = cmdImage(r, chName, []string{query})
 	} else {
 		data := getURLContents("https://baconipsum.com/?paras=1&type=all-meat", nil)
 		bacon_re := regexp.MustCompile(`anyipsum-output">(.*?\.)`)
@@ -314,97 +429,13 @@ func cmdBacon(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdBeer(r Recipient, chName, args string) (result string) {
-	bType := "search"
-	theUrl := fmt.Sprintf("%ssearch/?qt=beer&q=", COMMANDS["beer"].How)
-	if len(args) < 1 {
-		bType = "top"
-		theUrl = fmt.Sprintf("%slists/top/", COMMANDS["beer"].How)
-	}
-
-	if args == "me" {
-		args = r.MentionName
-	}
-
-	theUrl += url.QueryEscape(args)
-	data := getURLContents(theUrl, nil)
-
-	type Beer struct {
-		Abv      string
-		BeerType string
-		Brewery  string
-		Name     string
-		Rating   string
-		Url      string
-	}
-
-	var beer Beer
-
-	beer_re := regexp.MustCompile(`<a href="/(beer/profile/[0-9]+/[0-9]+/)"><span[^>]+>([^<]+)</span></a><br><span[^>]+><a href="/beer/profile/[0-9]+/">([^<]+)</a>`)
-	top_re := regexp.MustCompile(`<a href="/(beer/profile/[0-9]+/[0-9]+/)"><b>([^<]+)</b></a><span[^>]+><br><a href="/beer/profile/[0-9]+/">([^<]+)</a><br><a href="/beer/styles/[0-9]+/">([^<]+)</a> \| ([0-9.]+)%</span></td><td.+><b>([0-9.]+)</b>`)
-
-	for _, line := range strings.Split(string(data), "\n") {
-		if bType == "search" {
-			if m := beer_re.FindStringSubmatch(line); len(m) > 0 {
-				beer = Beer{"", "", m[3], m[2], "", m[1]}
-				theUrl = fmt.Sprintf("%s%s", COMMANDS["beer"].How, m[1])
-				data := getURLContents(theUrl, nil)
-				style_re := regexp.MustCompile(`<b>Style:</b> <a href=.*><b>(.*)</b></a>`)
-				abv_re := regexp.MustCompile(`<b>Alcohol by volume \(ABV\):</b> (.*)`)
-				next := false
-				for _, l2 := range strings.Split(string(data), "\n") {
-					if strings.Contains(l2, "<dt>Avg:</dt>") {
-						next = true
-						continue
-					}
-					if next {
-						beer.Rating = dehtmlify(l2)
-						next = false
-					}
-					if m := abv_re.FindStringSubmatch(l2); len(m) > 0 {
-						beer.Abv = m[1]
-					}
-					if m := style_re.FindStringSubmatch(l2); len(m) > 0 {
-						beer.BeerType = m[1]
-					}
-				}
-				break
-			}
-		} else {
-			if strings.HasPrefix(line, "<tr><td align=") {
-				beers := []Beer{}
-				for _, l2 := range strings.Split(line, "</tr>") {
-					if m := top_re.FindStringSubmatch(l2); len(m) > 0 {
-						b := Beer{m[5], m[4], m[3], m[2], m[6], m[1]}
-						beers = append(beers, b)
-					}
-				}
-				if len(beers) > 0 {
-					rand.Seed(time.Now().UnixNano())
-					beer = beers[rand.Intn(len(beers))]
-				}
-			}
-		}
-	}
-
-	if len(beer.Name) > 0 {
-		result = fmt.Sprintf("%s by %s - %s\n", beer.Name, beer.Brewery, beer.Rating)
-		result += fmt.Sprintf("%s (%s)\n", beer.BeerType, beer.Abv)
-		result += fmt.Sprintf("%s%s\n", COMMANDS["beer"].How, beer.Url)
-	} else {
-		result = fmt.Sprintf("No beer found for '%s'.", args)
-	}
-
-	return
-}
-
-func cmdBs(r Recipient, chName, args string) (result string) {
+func cmdBs(r Recipient, chName string, args []string) (result string) {
 
 	answer := ""
 
 	rand.Seed(time.Now().UnixNano())
 	var s = []string{
-		fmt.Sprintf("Well, @%s, I think you should probably", r.MentionName),
+		fmt.Sprintf("Well, <@%s>, I think you should probably", r.Id),
 		"A better idea:",
 		"Or perhaps",
 		"Y'all should",
@@ -828,9 +859,9 @@ func cmdBs(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdCert(r Recipient, chName, args string) (result string) {
-	names := strings.Split(args, " ")
-	if len(args) < 1 || len(names) > 3 {
+func cmdCert(r Recipient, chName string, args []string) (result string) {
+	names := args
+	if len(args) < 1 || len(args) > 3 {
 		result = "Usage: " + COMMANDS["cert"].Usage
 		return
 	}
@@ -935,7 +966,7 @@ func cmdCert(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdChannels(r Recipient, chName, args string) (result string) {
+func cmdChannels(r Recipient, chName string, args []string) (result string) {
 	var hipChatChannels []string
 	var slackChannels []string
 
@@ -965,23 +996,25 @@ func cmdChannels(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdCidr(r Recipient, chName, args string) (result string) {
-	if len(args) < 1 {
+func cmdCidr(r Recipient, chName string, args []string) (result string) {
+	if len(args) != 1 {
 		result = "Usage: " + COMMANDS["cidr"].Usage
 		return
 	}
 
+	input := args[0]
+
 	/* We're lazy here, but good enough. */
-	if !strings.Contains(args, "/") {
-		if strings.Contains(args, ":") {
-			args += "/128"
+	if !strings.Contains(input, "/") {
+		if strings.Contains(input, ":") {
+			input += "/128"
 		} else {
-			args += "/32"
+			input += "/32"
 		}
 	}
-	ip, ipnet, err := net.ParseCIDR(args)
+	ip, ipnet, err := net.ParseCIDR(input)
 	if err != nil {
-		result = fmt.Sprintf("'%s' does not look like a valid CIDR to me.", args)
+		result = fmt.Sprintf("'%s' does not look like a valid CIDR to me.", input)
 		return
 	}
 
@@ -1038,17 +1071,17 @@ func cmdCidr(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdClear(r Recipient, chName, args string) (result string) {
+func cmdClear(r Recipient, chName string, args []string) (result string) {
 	count := 24
 
 	if len(args) > 0 {
-		if _, err := fmt.Sscanf(args, "%d", &count); err != nil {
-			result = cmdInsult(r, chName, "me")
+		if _, err := fmt.Sscanf(args[0], "%d", &count); err != nil {
+			result = cmdInsult(r, chName, []string{"me"})
 			return
 		}
 	}
 	if count < 1 {
-		result = cmdInsult(r, chName, "me")
+		result = cmdInsult(r, chName, []string{"me"})
 		return
 	}
 
@@ -1069,7 +1102,7 @@ func cmdClear(r Recipient, chName, args string) (result string) {
 
 		result += "\n"
 		if rcount == 9 {
-			cowsay := cmdCowsay(r, chName, "clear")
+			cowsay := cmdCowsay(r, chName, []string{"clear"})
 			// strip leading "/quote "
 			cowsay = cowsay[8:]
 			result += " " + cowsay
@@ -1082,24 +1115,24 @@ func cmdClear(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdCowsay(r Recipient, chName, args string) (result string) {
+func cmdCowsay(r Recipient, chName string, args []string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["cowsay"].Usage
 		return
 	}
 
-	out, _ := runCommand("cowsay " + args)
+	out, _ := runCommand("cowsay " + strings.Join(args, " "))
 	result += "```\n" + string(out) + "```\n"
 
 	return
 }
 
-func cmdCurses(r Recipient, chName, args string) (result string) {
+func cmdCurses(r Recipient, chName string, args []string) (result string) {
 	result = getCountable("curses", chName, r, args)
 	return
 }
 
-func cmdEightBall(r Recipient, chName, args string) (result string) {
+func cmdEightBall(r Recipient, chName string, args []string) (result string) {
 	rand.Seed(time.Now().UnixNano())
 	answers := []string{
 		"It is certain.",
@@ -1127,8 +1160,8 @@ func cmdEightBall(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdFml(r Recipient, chName, args string) (result string) {
-	if len(args) > 1 {
+func cmdFml(r Recipient, chName string, args []string) (result string) {
+	if len(args) > 0 {
 		result = "Usage: " + COMMANDS["fml"].Usage
 		return
 	}
@@ -1146,8 +1179,8 @@ func cmdFml(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdFortune(r Recipient, chName, args string) (result string) {
-	if len(args) > 1 {
+func cmdFortune(r Recipient, chName string, args []string) (result string) {
+	if len(args) > 0 {
 		result = "Usage: " + COMMANDS["fortune"].Usage
 		return
 	}
@@ -1158,7 +1191,7 @@ func cmdFortune(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdGiphy(r Recipient, chName, args string) (result string) {
+func cmdGiphy(r Recipient, chName string, args []string) (result string) {
 	key := CONFIG["giphyApiKey"]
 	if len(key) < 1 {
 		result = "Sorry - no giphy API key in config file!\n"
@@ -1171,11 +1204,11 @@ func cmdGiphy(r Recipient, chName, args string) (result string) {
 	if len(args) < 1 {
 		theUrl = strings.Replace(theUrl, "search", "random?", 1)
 	} else {
-		if args == "jbot" {
+		if args[0] == "jbot" {
 			result = "https://jbot.corp.yahoo.com/jbot.gif"
 			return
 		}
-		theUrl += "?q=" + url.QueryEscape(args)
+		theUrl += "?q=" + url.QueryEscape(strings.Join(args, " "))
 	}
 
 	theUrl += "&api_key=" + url.QueryEscape(key)
@@ -1209,7 +1242,7 @@ func cmdGiphy(r Recipient, chName, args string) (result string) {
 	if sOk {
 		n := giphyJson["pagination"].(map[string]interface{})["count"].(float64)
 		if n == 0 {
-			result = fmt.Sprintf("No giphy results found for '%s'.", args)
+			result = fmt.Sprintf("No giphy results found for '%s'.", strings.Join(args, " "))
 			return
 		}
 		element := giphyData[rand.Intn(int(n))].(map[string]interface{})
@@ -1224,16 +1257,8 @@ func cmdGiphy(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdHelp(r Recipient, chName, args string) (result string) {
-	if args == "all" {
-		var cmds []string
-		result = "These are commands I know:\n"
-		for c := range COMMANDS {
-			cmds = append(cmds, c)
-		}
-		sort.Strings(cmds)
-		result += strings.Join(cmds, ", ")
-	} else if len(args) < 1 {
+func cmdHelp(r Recipient, chName string, args []string) (result string) {
+	if len(args) < 1 {
 		result = fmt.Sprintf("I know %d commands.\n"+
 			"Use '!help all' to show all commands.\n"+
 			"Ask me about a specific command via '!help <cmd>'.\n"+
@@ -1241,10 +1266,16 @@ func cmdHelp(r Recipient, chName, args string) (result string) {
 			len(COMMANDS))
 		result += "To ask me to leave a channel, say '!leave'.\n"
 		result += "If you need any other help or have suggestions or complaints, find support in #yaybot.\n"
+	} else if args[0] == "all" {
+		var cmds []string
+		result = "These are commands I know:\n"
+		for c := range COMMANDS {
+			cmds = append(cmds, c)
+		}
+		sort.Strings(cmds)
+		result += strings.Join(cmds, ", ")
 	} else {
-		for _, cmd := range strings.Split(args, " ") {
-
-			//alias := findCommandAlias(cmd)
+		for _, cmd := range args {
 			if _, found := COMMANDS[cmd]; found {
 				result = fmt.Sprintf("%s: %s. Usage:\n%s",
 					cmd,
@@ -1258,7 +1289,7 @@ func cmdHelp(r Recipient, chName, args string) (result string) {
 			} else {
 				/* 35 to account for 'No such command...' */
 				if len(cmd) >= (SLACK_MAX_LENGTH - 35) {
-					result = cmdInsult(r, chName, "me")
+					result = cmdInsult(r, chName, []string{"me"})
 				} else {
 					result = fmt.Sprintf("No such command: %s. Try '!help'.", cmd)
 				}
@@ -1268,27 +1299,27 @@ func cmdHelp(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdHost(r Recipient, chName, args string) (result string) {
-	if len(args) < 1 {
+func cmdHost(r Recipient, chName string, args []string) (result string) {
+	if len(args) != 1 {
 		result = "Usage: " + COMMANDS["host"].Usage
 		return
 	}
 
-	out, _ := runCommand(fmt.Sprintf("host %s", args))
+	out, _ := runCommand(fmt.Sprintf("host %s", args[0]))
 	result = string(out)
 
 	return
 }
 
-func cmdHow(r Recipient, chName, args string) (result string) {
-	if len(args) < 1 {
+func cmdHow(r Recipient, chName string, args []string) (result string) {
+	if len(args) != 1 {
 		result = "Usage: " + COMMANDS["how"].Usage
 		return
 	}
 
-	if _, found := COMMANDS[args]; found {
-		result = COMMANDS[args].How
-	} else if strings.EqualFold(args, CONFIG["mentionName"]) {
+	if _, found := COMMANDS[args[0]]; found {
+		result = COMMANDS[args[0]].How
+	} else if strings.EqualFold(args[0], CONFIG["mentionName"]) {
 		result = URLS["jbot"]
 	} else {
 		rand.Seed(time.Now().UnixNano())
@@ -1298,13 +1329,13 @@ func cmdHow(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdImage(r Recipient, chName, args string) (result string) {
-	if len(args) < 1 {
+func cmdImage(r Recipient, chName string, args []string) (result string) {
+	if len(args) != 1 {
 		result = "Usage: " + COMMANDS["img"].Usage
 		return
 	}
 
-	theUrl := fmt.Sprintf("%s%s", COMMANDS["img"].How, url.QueryEscape(args))
+	theUrl := fmt.Sprintf("%s%s", COMMANDS["img"].How, url.QueryEscape(args[0]))
 	data := getURLContents(theUrl, nil)
 
 	imgurl_re := regexp.MustCompile(`imgurl=(.*?)&`)
@@ -1321,22 +1352,25 @@ func cmdImage(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdInfo(r Recipient, chName, args string) (result string) {
-	if len(args) < 1 {
-		args = r.ReplyTo
+func cmdInfo(r Recipient, chName string, args []string) (result string) {
+	var subject string
+	if len(args) != 1 {
+		subject = r.ReplyTo
+	} else {
+		subject = args[0]
 	}
 
 	slack_channel_re := regexp.MustCompile(`(?i)<(#[A-Z0-9]+)\|([^>]+)>`)
-	m := slack_channel_re.FindStringSubmatch(args)
+	m := slack_channel_re.FindStringSubmatch(subject)
 	if len(m) > 0 {
 		result = getChannelInfo(m[1])
-		args = m[2]
+		subject = m[2]
 	} else {
-		result = getChannelInfo(args)
+		result = getChannelInfo(subject)
 	}
 
-	args = strings.ToLower(args)
-	if ch, found := getChannel(r.ChatType, args); found {
+	subject = strings.ToLower(subject)
+	if ch, found := getChannel(r.ChatType, subject); found {
 		result += fmt.Sprintf("I was invited into #%s by %s.\n", ch.Name, ch.Inviter)
 		result += fmt.Sprintf("These are the users I've seen in #%s:\n", ch.Name)
 
@@ -1354,48 +1388,46 @@ func cmdInfo(r Recipient, chName, args string) (result string) {
 		sort.Strings(names)
 		result += strings.Join(names, ", ")
 
-		stfu := cmdStfu(r, ch.Name, "")
+		stfu := cmdStfu(r, ch.Name, []string{})
 		if len(stfu) > 0 {
 			result += fmt.Sprintf("\nTop 10 channel chatterers for #%s:\n", ch.Name)
 			result += fmt.Sprintf("%s", stfu)
 		}
 
-		toggles := cmdToggle(r, ch.Name, "")
+		toggles := cmdToggle(r, ch.Name, []string{})
 		if len(toggles) > 0 {
 			result += fmt.Sprintf("\n%s", toggles)
 		}
 
-		throttles := cmdThrottle(r, ch.Name, "")
+		throttles := cmdThrottle(r, ch.Name, []string{})
 		if len(throttles) > 0 {
 			result += fmt.Sprintf("\n%s", throttles)
 		}
 
-		settings := cmdSet(r, ch.Name, "")
+		settings := cmdSet(r, ch.Name, []string{})
 		if !strings.HasPrefix(settings, "There currently are no settings") {
 			result += "\nThese are the channel settings:\n"
 			result += settings
 		}
 	} else {
-		result += "I'm not currently in #" + args
+		result += "I'm not currently in #" + subject
 	}
 	return
 }
 
-func cmdInsult(r Recipient, chName, args string) (result string) {
-	at_mention := "<@" + CONFIG["slackID"] + ">"
-	if (len(args) > 0) &&
-		((strings.ToLower(args) == strings.ToLower(CONFIG["mentionName"])) ||
-			(strings.ToLower(args) == "@"+strings.ToLower(CONFIG["mentionName"])) ||
-			(strings.ToLower(args) == strings.ToLower(at_mention)) ||
-			(args == "yourself") ||
-			(args == "me")) {
+func cmdInsult(r Recipient, chName string, args []string) (result string) {
+	var insultee string
+	if len(args) > 0 {
+		insultee = strings.Join(args, " ")
+	}
+	if addressedToTheBot(insultee) || insultee == "me" {
 		incrementCounter("insulted", r.MentionName)
-		result = fmt.Sprintf("@%s: ", r.MentionName)
+		result = fmt.Sprintf("<@%s>: ", r.Id)
 	}
 
-	if (len(result) < 1) && (len(args) > 0) {
-		incrementCounter("insulted", args)
-		result = fmt.Sprintf("%s: ", args)
+	if len(result) < 1 && len(insultee) > 0 {
+		incrementCounter("insulted", insultee)
+		result = fmt.Sprintf("%s: ", insultee)
 	}
 
 	rand.Seed(time.Now().UnixNano())
@@ -1421,67 +1453,8 @@ func cmdInsult(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdJira(r Recipient, chName, args string) (result string) {
-	if len(args) < 1 {
-		result = "Usage: " + COMMANDS["jira"].Usage
-		return
-	}
-
-	urlArgs := map[string]string{
-		"basic-auth-user":     CONFIG["jiraUser"],
-		"basic-auth-password": CONFIG["jiraPassword"],
-	}
-	ticket := strings.TrimSpace(strings.Split(args, " ")[0])
-	ticket = strings.TrimPrefix(args, URLS["jira"] + "/browse/")
-	jiraUrl := fmt.Sprintf("%s%s", COMMANDS["jira"].How, ticket)
-	data := getURLContents(jiraUrl, urlArgs)
-
-	var jiraJson map[string]interface{}
-	err := json.Unmarshal(data, &jiraJson)
-	if err != nil {
-		result = fmt.Sprintf("Unable to unmarshal jira data: %s\n", err)
-		return
-	}
-
-	if _, found := jiraJson["fields"]; !found {
-		if errmsg, found := jiraJson["errorMessages"]; found {
-			result = fmt.Sprintf("Unable to fetch data for %s: %s",
-				ticket, errmsg.([]interface{})[0].(string))
-			return
-		}
-		fmt.Fprintf(os.Stderr, "+++ jira fail for %s: %v\n", ticket, jiraJson)
-		result = fmt.Sprintf("No data found for ticket %s", ticket)
-		return
-	}
-
-	fields := jiraJson["fields"]
-	status := fields.(map[string]interface{})["status"].(map[string]interface{})["name"]
-	created := fields.(map[string]interface{})["created"]
-	summary := fields.(map[string]interface{})["summary"]
-	reporter := fields.(map[string]interface{})["reporter"].(map[string]interface{})["name"]
-
-	result = fmt.Sprintf("```Summary : %s\n", summary)
-	result += fmt.Sprintf("Status  : %s\n", status)
-	result += fmt.Sprintf("Created : %s\n", created)
-
-	resolved := fields.(map[string]interface{})["resolutiondate"]
-	if resolved != nil {
-		result += fmt.Sprintf("Resolved: %s\n", resolved)
-	}
-
-	assignee := fields.(map[string]interface{})["assignee"]
-	if assignee != nil {
-		name := assignee.(map[string]interface{})["name"]
-		result += fmt.Sprintf("Assignee: %s\n", name)
-	}
-
-	result += fmt.Sprintf("Reporter: %s```\n", reporter)
-	result += fmt.Sprintf("%s/browse/%s", URLS["jira"], ticket)
-	return
-}
-
-func cmdLatLong(r Recipient, chName, args string) (result string) {
-	if len(args) < 1 {
+func cmdLatLong(r Recipient, chName string, args []string) (result string) {
+	if len(args) != 1 {
 		result = "Usage: " + COMMANDS["latlong"].Usage
 		return
 	}
@@ -1490,7 +1463,7 @@ func cmdLatLong(r Recipient, chName, args string) (result string) {
 
 	v := url.Values{}
 	v.Add("action", "gpcm")
-	v.Add("c1", args)
+	v.Add("c1", args[0])
 
 	latlongURL := COMMANDS["latlong"].How + "_spm4.php"
 	req, err := http.NewRequest("POST", latlongURL, strings.NewReader(v.Encode()))
@@ -1517,18 +1490,22 @@ func cmdLatLong(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdLog(r Recipient, chName, args string) (result string) {
+func cmdLog(r Recipient, chName string, args []string) (result string) {
 	var room string
 	if r.ChatType == "hipchat" {
 		room = r.ReplyTo
 	} else if r.ChatType == "slack" {
 		room = chName
 	}
+
 	if len(args) > 1 {
-		room = args
+		result = "Usage: " + COMMANDS["log"].Usage
+		return
+	} else if len(args) == 1 {
+		room = args[0]
 	}
 
-	roomInfo := cmdRoom(r, chName, room)
+	roomInfo := cmdRoom(r, chName, []string{room})
 
 	if strings.Contains(roomInfo, "https://") {
 		result = roomInfo[strings.Index(roomInfo, "https://"):]
@@ -1538,14 +1515,13 @@ func cmdLog(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdMan(r Recipient, chName, args string) (result string) {
-	query := strings.Split(args, " ")
-	if len(args) < 1 || len(query) > 2 {
+func cmdMan(r Recipient, chName string, args []string) (result string) {
+	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["man"].Usage
 		return
 	}
 
-	if args == "woman" {
+	if args[0] == "woman" {
 		rand.Seed(time.Now().UnixNano())
 		replies := []string{
 			"That's not very original, now is it?",
@@ -1558,11 +1534,11 @@ func cmdMan(r Recipient, chName, args string) (result string) {
 	}
 
 	var section string
-	if len(query) == 2 {
-		section = url.QueryEscape(query[0])
+	if len(args) == 2 {
+		section = url.QueryEscape(args[0])
 	}
 
-	cmd := url.QueryEscape(query[len(query)-1])
+	cmd := url.QueryEscape(args[len(args)-1])
 
 	if len(section) > 0 {
 		result = getManResults(section, cmd)
@@ -1585,18 +1561,22 @@ func cmdMan(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdMonkeyStab(r Recipient, chName, args string) (result string) {
-	if len(args) < 1 || strings.EqualFold(args, CONFIG["mentionName"]) {
-		args = r.MentionName
+func cmdMonkeyStab(r Recipient, chName string, args []string) (result string) {
+	var stabbee string
+	if len(args) > 0 {
+		stabbee = strings.Join(args, " ")
+	}
+	if len(args) < 1 || addressedToTheBot(stabbee) || stabbee == "me" {
+		stabbee = fmt.Sprintf("<@%s>", r.Id)
 	}
 
-	result = fmt.Sprintf("_unleashes a troop of pen-wielding stabbing-monkeys on %s!_\n", args)
+	result = fmt.Sprintf("_unleashes a troop of pen-wielding stabbing-monkeys on %s!_\n", stabbee)
 	return
 }
 
-func cmdOid(r Recipient, chName, args string) (result string) {
-	oids := strings.Split(args, " ")
-	if len(args) < 1 || len(oids) != 1 {
+func cmdOid(r Recipient, chName string, args []string) (result string) {
+	oids := args
+	if len(oids) != 1 {
 		result = "Usage: " + COMMANDS["oid"].Usage
 		return
 	}
@@ -1655,7 +1635,6 @@ func cmdOid(r Recipient, chName, args string) (result string) {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-
 		for _, k := range keys {
 			result += fmt.Sprintf("%s: %s\n", k, info[k])
 		}
@@ -1664,12 +1643,12 @@ func cmdOid(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdOnion(r Recipient, chName, args string) (result string) {
+func cmdOnion(r Recipient, chName string, args []string) (result string) {
 	search := false
 	theUrl := COMMANDS["onion"].How + "rss"
 
 	if len(args) > 0 {
-		theUrl = fmt.Sprintf("%ssearch?q=%s", COMMANDS["onion"].How, url.QueryEscape(args))
+		theUrl = fmt.Sprintf("%ssearch?q=%s", COMMANDS["onion"].How, url.QueryEscape(strings.Join(args, " ")))
 		search = true
 	}
 
@@ -1712,10 +1691,24 @@ func cmdOnion(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdOncall(r Recipient, chName, args string) (result string) {
-	oncall := args
+func cmdOncall(r Recipient, chName string, args []string) (result string) {
+	input := strings.Join(args, " ")
+
+	var oncall string
+	var noncall string
+	if len(args) == 1 {
+		oncall = args[0]
+	}
 	oncall_source := "user input"
-	if len(strings.Fields(oncall)) < 1 {
+
+	atMention := false
+	uparrow_re := regexp.MustCompile(`(?i)^(-*\^+|https?://)`)
+	if uparrow_re.Match([]byte(input)) || len(args) > 1 {
+		atMention = true
+		oncall = ""
+	}
+
+	if len(oncall) < 1 {
 		if ch, found := getChannel(r.ChatType, r.ReplyTo); found {
 			if r.ChatType == "hipchat" {
 				oncall = r.ReplyTo
@@ -1727,38 +1720,84 @@ func cmdOncall(r Recipient, chName, args string) (result string) {
 				oncall = v
 				oncall_source = "channel setting"
 			}
-		} else {
+			noncall, _ = ch.Settings["noncall"]
+		} else if !atMention {
 			result = "Usage: " + COMMANDS["oncall"].Usage
 			return
 		}
 	}
 
-	oncallFound := true
-	result += cmdOncallOpsGenie(r, chName, oncall, true)
-	if len(result) < 1 {
-		result = fmt.Sprintf("No oncall information found for '%s'.\n", oncall)
-		oncallFound = false
-	}
+	for _, rot := range strings.Split(oncall, ",") {
 
-	if strings.HasPrefix(result, "No OpsGenie schedule found for") {
-		oncallFound = false
-	}
-
-	if !oncallFound {
-		switch oncall_source {
-		case "channel name":
-			result += fmt.Sprintf("\nIf your oncall rotation does not match your channel name (%s), use '!set oncall=<rotation_name>'.\n", chName)
-		case "channel setting":
-			result += fmt.Sprintf("\nIs your 'oncall' channel setting (%s) correct?\n", oncall)
-			result += "If not, use '!set oncall=<rotation_name>' to fix that.\n"
+		result = cmdOncallSnow(r, chName, []string{rot})
+		if strings.Contains(result, "Primary") ||
+			strings.Contains(result, "Secondary") {
+			continue
 		}
+
+		if strings.Contains(result, "@") {
+			result += "\n"
+		} else {
+			result = ""
+		}
+
+		oncallFound := true
+		result += cmdOncallOpsGenie(r, chName, rot, true)
+		if len(result) < 1 {
+			result = fmt.Sprintf("No oncall information found for '%s'.\n", oncall)
+			oncallFound = false
+		}
+		if strings.HasPrefix(result, "No OpsGenie schedule found for") {
+			oncallFound = false
+		}
+
+		if !oncallFound {
+			if len(noncall) > 0 && oncall_source != "user input" {
+				result = noncall
+				continue
+			}
+			switch oncall_source {
+			case "channel name":
+				result += fmt.Sprintf("\nIf your oncall rotation does not match your channel name (%s), use '!set oncall=<rotation_name>'.\n", chName)
+			case "channel setting":
+				result += fmt.Sprintf("\nIs your 'oncall' channel setting (%s) correct?\n", oncall)
+				result += "If not, use '!set oncall=<rotation_name>' to fix that.\n"
+			}
+		}
+
+		if atMention {
+			user_re := regexp.MustCompile(`(?i)directory.vzbuilders.com/view/vzm/([^|]+)`)
+			if m := user_re.FindAllStringSubmatch(result, -1); len(m) > 0 {
+				users := map[string]bool{}
+				for _, u := range m {
+					user, err := SLACK_CLIENT.GetUserByEmail(u[1] + "@" + CONFIG["emailDomain"])
+					if err == nil {
+						users[fmt.Sprintf("<@%s>", user.ID)] = true
+					}
+				}
+				if len(users) > 0 {
+					var keys []string
+					for k, _ := range users {
+						keys = append(keys, k)
+					}
+					sort.Strings(keys)
+
+					result = ""
+					for _, k := range keys {
+						result += k + " "
+					}
+					result += " --^"
+				}
+			}
+		}
+
 	}
 	return
 }
 
-func cmdPing(r Recipient, chName, args string) (result string) {
+func cmdPing(r Recipient, chName string, args []string) (result string) {
 	ping := "ping"
-	hosts := strings.Fields(args)
+	hosts := args
 	if len(hosts) > 1 {
 		result = "Usage: " + COMMANDS["ping"].Usage
 		return
@@ -1782,7 +1821,7 @@ func cmdPing(r Recipient, chName, args string) (result string) {
 				fmt.Sprintf("@%s, somebody needs you!", hosts[0]),
 				fmt.Sprintf("ECHO REQUEST -> @%s", hosts[0]),
 				fmt.Sprintf("You there, @%s?", hosts[0]),
-				fmt.Sprintf("Hey, @%s, @%s is looking for you.", hosts[0], r.MentionName),
+				fmt.Sprintf("Hey, @%s, <@%s> is looking for you.", hosts[0], r.Id),
 				fmt.Sprintf("_nudges %s._", hosts[0]),
 				fmt.Sprintf("_pings %s._", hosts[0]),
 				fmt.Sprintf("_pokes %s._", hosts[0]),
@@ -1814,7 +1853,7 @@ func cmdPing(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdPraise(r Recipient, chName, args string) (result string) {
+func cmdPraise(r Recipient, chName string, args []string) (result string) {
 	if _, found := CHANNELS[chName]; !found {
 		result = "This command only works in a channel."
 		return
@@ -1825,31 +1864,31 @@ func cmdPraise(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	expandedUser := expandSlackUser(args)
+	praisee := strings.Join(args, " ")
+	expandedUser := expandSlackUser(praisee)
 	if expandedUser != nil && expandedUser.ID != "" {
-		args = expandedUser.Name
+		praisee = expandedUser.Name
 	}
-	if strings.EqualFold(args, "me") ||
-		strings.EqualFold(args, "myself") ||
-		strings.EqualFold(args, r.MentionName) {
-		result = cmdInsult(r, chName, "me")
+	if strings.EqualFold(praisee, "me") ||
+		strings.EqualFold(praisee, "myself") ||
+		strings.EqualFold(praisee, r.MentionName) {
+		result = cmdInsult(r, chName, []string{"me"})
 		return
 	}
 
-	incrementCounter("praised", args)
-	if strings.EqualFold(args, CONFIG["mentionName"]) {
+	incrementCounter("praised", praisee)
+	if addressedToTheBot(praisee) {
 		rand.Seed(time.Now().UnixNano())
 		result = THANKYOU[rand.Intn(len(THANKYOU))]
 	} else {
-		result = fmt.Sprintf("%s: %s\n", args,
+		result = fmt.Sprintf("%s: %s\n", praisee,
 			randomLineFromUrl(COMMANDS["praise"].How, false))
 	}
 	return
 }
 
-func cmdPwgen(r Recipient, chName, args string) (result string) {
-	arguments := strings.Fields(args)
-	if len(arguments) > 3 {
+func cmdPwgen(r Recipient, chName string, args []string) (result string) {
+	if len(args) > 3 {
 		result = "Usage: " + COMMANDS["pwgen"].Usage
 		return
 	}
@@ -1858,7 +1897,7 @@ func cmdPwgen(r Recipient, chName, args string) (result string) {
 	var i int
 	lines := 1
 
-	for n, a := range arguments {
+	for n, a := range args {
 		if _, err := fmt.Sscanf(a, "%d", &i); err != nil {
 			result = "'" + a + "' does not look like a number to me."
 			return
@@ -1887,16 +1926,18 @@ func cmdPwgen(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdQuote(r Recipient, chName, args string) (result string) {
+func cmdQuote(r Recipient, chName string, args []string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["quote"].Usage
 		return
 	}
 
-	result = fmt.Sprintf("\"%s\"", args)
+	subject := strings.Join(args, " ")
 
-	args = strings.ToUpper(args)
-	theURL := fmt.Sprintf("%s%s", COMMANDS["quote"].How, url.QueryEscape(args))
+	result = fmt.Sprintf("\"%s\"", subject)
+
+	subject = strings.ToUpper(subject)
+	theURL := fmt.Sprintf("%s%s", COMMANDS["quote"].How, url.QueryEscape(subject))
 	data := getURLContents(theURL, nil)
 
 	type Quote struct {
@@ -1942,7 +1983,7 @@ func cmdQuote(r Recipient, chName, args string) (result string) {
 	}
 
 	for q, d := range y.Context.Dispatcher.Stores.StreamDataStore.QuoteData {
-		if q == args {
+		if q == subject {
 			result = fmt.Sprintf("<%s|%s (%s)> trading on '%s':\n```", theURL, q, d.ShortName, d.FullExchangeName)
 			result += fmt.Sprintf("Previous Close: $%s\n", d.RegularMarketPreviousClose.Fmt)
 			result += fmt.Sprintf("Open          : $%s\n", d.RegularMarketOpen.Fmt)
@@ -1953,8 +1994,8 @@ func cmdQuote(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdRfc(r Recipient, chName, args string) (result string) {
-	rfcs := strings.Split(args, " ")
+func cmdRfc(r Recipient, chName string, args []string) (result string) {
+	rfcs := args
 	if len(rfcs) != 1 {
 		result = "Usage: " + COMMANDS["rfc"].Usage
 		return
@@ -1985,13 +2026,13 @@ func cmdRfc(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdRoom(r Recipient, chName, args string) (result string) {
+func cmdRoom(r Recipient, chName string, args []string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["room"].Usage
 		return
 	}
 
-	room := strings.TrimSpace(args)
+	room := strings.TrimSpace(args[0])
 	lroom := strings.ToLower(room)
 
 	type roomTopic struct {
@@ -2082,8 +2123,8 @@ func cmdRoom(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdSeen(r Recipient, chName, args string) (result string) {
-	wanted := strings.Split(args, " ")
+func cmdSeen(r Recipient, chName string, args []string) (result string) {
+	wanted := args
 	user := wanted[0]
 	verbose(4, "Looking in %s", r.ReplyTo)
 
@@ -2100,7 +2141,7 @@ func cmdSeen(r Recipient, chName, args string) (result string) {
 		ch, found = getChannel(r.ChatType, chName)
 	}
 
-	if strings.EqualFold(args, CONFIG["mentionName"]) {
+	if addressedToTheBot(user) {
 		rand.Seed(time.Now().UnixNano())
 		replies := []string{
 			"You can't see me, I'm not really here.",
@@ -2144,9 +2185,13 @@ func cmdSeen(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdSet(r Recipient, chName, args string) (result string) {
-	input := strings.SplitN(args, "=", 2)
-	if len(args) > 1 && len(input) != 2 {
+func cmdSet(r Recipient, chName string, args []string) (result string) {
+	var input []string
+	if len(args) == 1 {
+		input = strings.SplitN(args[0], "=", 2)
+	}
+
+	if len(args) > 1 {
 		result = "Usage:\n" + COMMANDS["set"].Usage
 		return
 	}
@@ -2163,21 +2208,41 @@ func cmdSet(r Recipient, chName, args string) (result string) {
 			result = fmt.Sprintf("There currently are no settings for #%s.", chName)
 			return
 		}
-		for n, v := range ch.Settings {
-			result += fmt.Sprintf("%s=%s\n", n, v)
+
+		sorted := []string{}
+		for n, _ := range ch.Settings {
+			sorted = append(sorted, n)
+		}
+		sort.Strings(sorted)
+
+		for _, s := range sorted {
+			result += fmt.Sprintf("%s=%s\n", s, ch.Settings[s])
 		}
 		return
 	}
 
 	name := strings.TrimSpace(input[0])
+	if len(input) == 1 {
+		s, found := ch.Settings[name]
+		if found {
+			result = fmt.Sprintf("%s=%s\n", name, s)
+		} else {
+			result = fmt.Sprintf("No such setting: %s\n", name)
+		}
+		return
+	}
+
 	value := strings.TrimSpace(input[1])
 
 	/* Users sometimes call "!set oncall=<team>" with
 	* the literal brackets; let's help them. */
-	value = strings.TrimPrefix(value, "<")
-	value = strings.TrimPrefix(value, "&lt;")
-	value = strings.TrimSuffix(value, ">")
-	value = strings.TrimSuffix(value, "&gt;")
+	slack_user_re := regexp.MustCompile(`(?i)<@([A-Z0-9]+)>`)
+	if !slack_user_re.MatchString(value) {
+		value = strings.TrimPrefix(value, "<")
+		value = strings.TrimPrefix(value, "&lt;")
+		value = strings.TrimSuffix(value, ">")
+		value = strings.TrimSuffix(value, "&gt;")
+	}
 
 	if len(ch.Settings) < 1 {
 		ch.Settings = map[string]string{}
@@ -2185,6 +2250,10 @@ func cmdSet(r Recipient, chName, args string) (result string) {
 
 	old := ""
 	if old, found = ch.Settings[name]; found {
+		if value == old {
+			result = fmt.Sprintf("'%s' unchanged.", name)
+			return
+		}
 		old = fmt.Sprintf(" (was: %s)", old)
 	}
 
@@ -2194,11 +2263,16 @@ func cmdSet(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdSms(r Recipient, chName, args string) (result string) {
+func cmdSms(r Recipient, chName string, args []string) (result string) {
 	lookupType := "number"
-	shortcode := args
+	shortcode := ""
 	if len(args) < 1 {
 		shortcode = "773786" // Yahoo! Shortcode
+	} else if len(args) > 1 {
+		result = "Usage: " + COMMANDS["sms"].Usage
+		return
+	} else {
+		shortcode = args[0]
 	}
 
 	shortcode = strings.Replace(shortcode, "-", "", -1)
@@ -2250,12 +2324,12 @@ func cmdSms(r Recipient, chName, args string) (result string) {
 	}
 
 	if len(result) < 1 {
-		result = "No results found for '" + args + "'."
+		result = "No results found for '" + shortcode + "'."
 	}
 	return
 }
 
-func cmdSpeb(r Recipient, chName, args string) (result string) {
+func cmdSpeb(r Recipient, chName string, args []string) (result string) {
 	if len(args) > 0 {
 		result = "Usage: " + COMMANDS["speb"].Usage
 		return
@@ -2265,7 +2339,7 @@ func cmdSpeb(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdStfu(r Recipient, chName, args string) (result string) {
+func cmdStfu(r Recipient, chName string, args []string) (result string) {
 	var ch *Channel
 	var found bool
 
@@ -2278,14 +2352,14 @@ func cmdStfu(r Recipient, chName, args string) (result string) {
 
 	if r.ChatType == "hipchat" {
 		for u := range ch.HipChatUsers {
-			if (len(args) > 0) && (u.MentionName != args) {
+			if (len(args) > 0) && (u.MentionName != args[0]) {
 				continue
 			}
 			chatter[ch.HipChatUsers[u].Count] = append(chatter[ch.HipChatUsers[u].Count], u.MentionName)
 		}
 	} else if r.ChatType == "slack" {
 		for u := range ch.SlackUsers {
-			if (len(args) > 0) && (u != args) {
+			if (len(args) > 0) && (u != args[0]) {
 				continue
 			}
 			chatter[ch.SlackUsers[u].Count] = append(chatter[ch.SlackUsers[u].Count], u)
@@ -2294,7 +2368,7 @@ func cmdStfu(r Recipient, chName, args string) (result string) {
 
 	if (len(args) > 0) && (len(chatter) < 1) {
 		result = fmt.Sprintf("%s hasn't said anything in %s.",
-			args, chName)
+			args[0], chName)
 		return
 	}
 
@@ -2319,8 +2393,8 @@ func cmdStfu(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdTfln(r Recipient, chName, args string) (result string) {
-	if len(args) > 1 {
+func cmdTfln(r Recipient, chName string, args []string) (result string) {
+	if len(args) > 0 {
 		result = "Usage: " + COMMANDS["tfln"].Usage
 		return
 	}
@@ -2337,8 +2411,8 @@ func cmdTfln(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdThrottle(r Recipient, chName, args string) (result string) {
-	input := strings.Split(args, " ")
+func cmdThrottle(r Recipient, chName string, args []string) (result string) {
+	input := args
 	if len(input) > 2 {
 		result = "Usage: " + COMMANDS["throttle"].Usage
 		return
@@ -2352,7 +2426,7 @@ func cmdThrottle(r Recipient, chName, args string) (result string) {
 		}
 
 		if newThrottle < 0 {
-			result = cmdInsult(r, chName, "me")
+			result = cmdInsult(r, chName, []string{"me"})
 			return
 		}
 	}
@@ -2364,7 +2438,7 @@ func cmdThrottle(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	if len(args) > 1 {
+	if len(args) > 0 {
 		d, err := time.ParseDuration(fmt.Sprintf("%ds", newThrottle-DEFAULT_THROTTLE))
 		if err != nil {
 			result = fmt.Sprintf("Unable to parse new duration: %s", err)
@@ -2394,10 +2468,10 @@ func cmdThrottle(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdTime(r Recipient, chName, args string) (result string) {
+func cmdTime(r Recipient, chName string, args []string) (result string) {
 	timezones := []string{"Asia/Taipei", "Asia/Calcutta", "UTC", "EST5EDT", "PST8PDT"}
 	if len(args) > 0 {
-		timezones = []string{args}
+		timezones = args
 	}
 
 	for _, l := range timezones {
@@ -2431,9 +2505,9 @@ func cmdTime(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdTld(r Recipient, chName, args string) (result string) {
-	input := strings.Fields(args)
-	if len(args) < 1 || len(input) != 1 {
+func cmdTld(r Recipient, chName string, args []string) (result string) {
+	input := args
+	if len(input) != 1 {
 		result = "Usage: " + COMMANDS["tld"].Usage
 		return
 	}
@@ -2487,15 +2561,13 @@ func cmdTld(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdToggle(r Recipient, chName, args string) (result string) {
+func cmdToggle(r Recipient, chName string, args []string) (result string) {
 	wanted := "all"
 	if len(args) > 1 {
-		words := strings.Split(args, " ")
-		if len(words) > 1 {
-			result = "Usage: " + COMMANDS["toggle"].Usage
-			return
-		}
-		wanted = words[0]
+		result = "Usage: " + COMMANDS["toggle"].Usage
+		return
+	} else if len(args) == 1 {
+		wanted = args[0]
 	}
 
 	if ch, found := CHANNELS[chName]; found {
@@ -2527,8 +2599,9 @@ func cmdToggle(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdResetCounter(r Recipient, chName, input string) (result string) {
+func cmdResetCounter(r Recipient, chName string, args []string) (result string) {
 
+	input := strings.Join(args, " ")
 	if CONFIG["botOwner"] != r.MentionName {
 		result = fmt.Sprintf("Sorry, %s is not allowed to run this command.", r.MentionName)
 		return
@@ -2545,7 +2618,8 @@ func cmdResetCounter(r Recipient, chName, input string) (result string) {
 	return
 }
 
-func cmdTop(r Recipient, chName, input string) (result string) {
+func cmdTop(r Recipient, chName string, args []string) (result string) {
+	input := strings.Join(args, " ")
 	counter, err := getCounter(input)
 	if len(err) > 0 {
 		result = err
@@ -2572,7 +2646,7 @@ func cmdTop(r Recipient, chName, input string) (result string) {
 	return
 }
 
-func cmdTrivia(r Recipient, chName, args string) (result string) {
+func cmdTrivia(r Recipient, chName string, args []string) (result string) {
 	if len(args) > 0 {
 		result = "Usage: " + COMMANDS["trivia"].Usage
 		return
@@ -2582,20 +2656,21 @@ func cmdTrivia(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdTroutSlap(r Recipient, chName, args string) (result string) {
-	if len(args) < 1 || strings.EqualFold(args, CONFIG["mentionName"]) {
-		args = r.MentionName
+func cmdTroutSlap(r Recipient, chName string, args []string) (result string) {
+	slappee := strings.Join(args, " ")
+	if addressedToTheBot(slappee) || slappee == "me" {
+		slappee = fmt.Sprintf("<@%s>", r.Id)
 	}
 
-	result = fmt.Sprintf("_pulls out a foul-smelling trout and slaps %s across the face._\n", args)
+	result = fmt.Sprintf("_pulls out a foul-smelling trout and slaps %s across the face._\n", slappee)
 	return
 }
 
-func cmdUd(r Recipient, chName, args string) (result string) {
+func cmdUd(r Recipient, chName string, args []string) (result string) {
 
 	theUrl := COMMANDS["ud"].How
 	if len(args) > 0 {
-		theUrl += fmt.Sprintf("define.php?term=%s", url.QueryEscape(args))
+		theUrl += fmt.Sprintf("define.php?term=%s", url.QueryEscape(strings.Join(args, " ")))
 	} else {
 		rand.Seed(time.Now().UnixNano())
 		n := rand.Intn(1000)
@@ -2643,8 +2718,8 @@ func cmdUd(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdUnset(r Recipient, chName, args string) (result string) {
-	input := strings.Fields(args)
+func cmdUnset(r Recipient, chName string, args []string) (result string) {
+	input := args
 	if len(input) != 1 {
 		result = "Usage: " + COMMANDS["unset"].Usage
 		return
@@ -2662,18 +2737,18 @@ func cmdUnset(r Recipient, chName, args string) (result string) {
 	}
 
 	old := ""
-	if old, found = ch.Settings[args]; found {
-		delete(ch.Settings, args)
-		result = fmt.Sprintf("Deleted %s=%s.", args, old)
+	if old, found = ch.Settings[args[0]]; found {
+		delete(ch.Settings, args[0])
+		result = fmt.Sprintf("Deleted %s=%s.", args[0], old)
 	} else {
-		result = fmt.Sprintf("No such setting: '%s'.", args)
+		result = fmt.Sprintf("No such setting: '%s'.", args[9])
 	}
 
 	return
 }
 
-func cmdUnthrottle(r Recipient, chName, args string) (result string) {
-	if len(args) < 1 {
+func cmdUnthrottle(r Recipient, chName string, args []string) (result string) {
+	if len(args) != 1 {
 		result = "Usage: " + COMMANDS["unthrottle"].Usage
 		return
 	}
@@ -2685,12 +2760,12 @@ func cmdUnthrottle(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	if args == "*" || args == "everything" {
+	if args[0] == "*" || args[0] == "everything" {
 		for t, _ := range ch.Throttles {
 			delete(ch.Throttles, t)
 		}
 	} else {
-		delete(ch.Throttles, args)
+		delete(ch.Throttles, args[0])
 	}
 
 	replies := []string{
@@ -2708,7 +2783,7 @@ func cmdUnthrottle(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdUser(r Recipient, chName, args string) (result string) {
+func cmdUser(r Recipient, chName string, args []string) (result string) {
 	if r.ChatType == "slack" {
 		result = "Sorry, this feature only works for HipChat right now."
 		return
@@ -2719,7 +2794,7 @@ func cmdUser(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	user := strings.TrimSpace(args)
+	user := strings.TrimSpace(args[0])
 	candidates := []*hipchat.User{}
 
 	for _, u := range HIPCHAT_ROSTER {
@@ -2769,8 +2844,8 @@ func cmdUser(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdVu(r Recipient, chName, args string) (result string) {
-	nums := strings.Split(args, " ")
+func cmdVu(r Recipient, chName string, args []string) (result string) {
+	nums := args
 	if len(nums) != 1 {
 		result = "Usage: " + COMMANDS["vu"].Usage
 		return
@@ -2816,7 +2891,8 @@ func cmdVu(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdWeather(r Recipient, chName, args string) (result string) {
+func cmdWeather(r Recipient, chName string, args []string) (result string) {
+	var where string
 	apikey := CONFIG["openweathermapApiKey"]
 	if len(apikey) < 1 {
 		result = "Missing OpenWeatherMap API Key."
@@ -2824,38 +2900,38 @@ func cmdWeather(r Recipient, chName, args string) (result string) {
 	}
 
 	if len(args) < 1 {
-		args = r.MentionName
+		where = r.MentionName
 	}
 
-	u := expandSlackUser(args)
+	u := expandSlackUser(args[0])
 	if u != nil && u.ID != "" {
-		args = u.Name
+		where = u.Name
 	}
 
-	if args == CONFIG["mentionName"] {
-		args = "ne1"
+	if where == CONFIG["mentionName"] {
+		where = "ne1"
 	}
 
-	address := getUserAddress(args)
+	address := getUserAddress(where)
 	if len(address) > 0 {
 		addressFields := strings.Split(address, ",")
 		n := len(addressFields)
 		if n > 1 {
-			args = fmt.Sprintf("%s, %s", strings.TrimSpace(addressFields[n-2]),
+			where = fmt.Sprintf("%s, %s", strings.TrimSpace(addressFields[n-2]),
 				strings.TrimSpace(addressFields[n-1]))
 		} else {
-			args = address
+			where = address
 		}
 	} else {
 		var unused Recipient
-		coloInfo := cmdColo(unused, "", args)
+		coloInfo := cmdColo(unused, "", []string{where})
 		r := regexp.MustCompile(`(?m)Location\s+: (.+)`)
 		if m := r.FindStringSubmatch(coloInfo); len(m) > 0 {
-			args = m[1]
+			where = m[1]
 		}
 	}
 
-	latlon := cmdLatLong(r, chName, args)
+	latlon := cmdLatLong(r, chName, []string{where})
 
 	query := "weather?appid=" + apikey + "&"
 	if strings.Contains(latlon, ",") {
@@ -2863,12 +2939,12 @@ func cmdWeather(r Recipient, chName, args string) (result string) {
 		query += fmt.Sprintf("lat=%s&lon=%s", ll[0], ll[1])
 	} else {
 		re := regexp.MustCompile(`^([0-9-]+)(,.*)?$`)
-		if re.MatchString(args) {
+		if re.MatchString(where) {
 			query += "zip="
 		} else {
 			query += "q="
 		}
-		query += url.QueryEscape(args)
+		query += url.QueryEscape(where)
 	}
 
 	theURL := fmt.Sprintf("https://api.openweathermap.org/data/2.5/%s", query)
@@ -2911,7 +2987,7 @@ func cmdWeather(r Recipient, chName, args string) (result string) {
 	}
 
 	if len(w.Name) < 1 {
-		result = fmt.Sprintf("Sorry, location '%s' not found.\n", args)
+		result = fmt.Sprintf("Sorry, location '%s' not found.\n", where)
 		return
 	}
 
@@ -2939,8 +3015,8 @@ func tempStringFromKelvin(t float64) (s string) {
 	return
 }
 
-func cmdWhocyberedme(r Recipient, chName, args string) (result string) {
-	if len(args) > 1 {
+func cmdWhocyberedme(r Recipient, chName string, args []string) (result string) {
+	if len(args) > 0 {
 		result = "Usage: " + COMMANDS["whocyberedme"].Usage
 		return
 	}
@@ -2956,8 +3032,8 @@ func cmdWhocyberedme(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdWhois(r Recipient, chName, args string) (result string) {
-	if len(strings.Fields(args)) != 1 {
+func cmdWhois(r Recipient, chName string, args []string) (result string) {
+	if len(args) != 1 {
 		result = "Usage: " + COMMANDS["whois"].Usage
 		return
 	}
@@ -2968,7 +3044,7 @@ func cmdWhois(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	out, _ := runCommand(fmt.Sprintf("whois %s", args))
+	out, _ := runCommand(fmt.Sprintf("whois %s", args[0]))
 	data := string(out)
 
 	/* whois formatting is a mess; different whois servers return
@@ -3161,13 +3237,14 @@ func cmdWhois(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdWiki(r Recipient, chName, args string) (result string) {
+func cmdWiki(r Recipient, chName string, args []string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["wiki"].Usage
 		return
 	}
+	wiki := strings.Join(args, " ")
 
-	query := url.QueryEscape(args)
+	query := url.QueryEscape(wiki)
 	theUrl := fmt.Sprintf("%s%s", COMMANDS["wiki"].How, query)
 	data := getURLContents(theUrl, nil)
 
@@ -3186,7 +3263,7 @@ func cmdWiki(r Recipient, chName, args string) (result string) {
 	}
 
 	if len(jsonData) < 4 {
-		result = fmt.Sprintf("Something went bump when getting wiki json for '%s'.", args)
+		result = fmt.Sprintf("Something went bump when getting wiki json for '%s'.", wiki)
 		return
 	}
 
@@ -3194,7 +3271,7 @@ func cmdWiki(r Recipient, chName, args string) (result string) {
 	urls := jsonData[3]
 
 	if len(sentences.([]interface{})) < 1 {
-		result = fmt.Sprintf("No Wikipedia page found for '%s'.", args)
+		result = fmt.Sprintf("No Wikipedia page found for '%s'.", wiki)
 		return
 	}
 
@@ -3213,12 +3290,12 @@ func cmdWiki(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdWtf(r Recipient, chName, args string) (result string) {
+func cmdWtf(r Recipient, chName string, args []string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["wtf"].Usage
 		return
 	}
-	terms := strings.Split(args, " ")
+	terms := args
 	if (len(terms) > 2) || ((len(terms) == 2) && (terms[0] != "is")) {
 		result = "Usage: " + COMMANDS["wtf"].Usage
 		return
@@ -3247,7 +3324,7 @@ func cmdWtf(r Recipient, chName, args string) (result string) {
 		slack_user = u.Name
 	}
 	if slack_user != term {
-		result = cmdBy(r, "", slack_user)
+		result = cmdBy(r, "", []string{slack_user})
 		if len(result) > 0 {
 			if strings.HasPrefix(result, "No such user") {
 				term = slack_user
@@ -3278,17 +3355,17 @@ func cmdWtf(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdXkcd(r Recipient, chName, args string) (result string) {
+func cmdXkcd(r Recipient, chName string, args []string) (result string) {
 	latest := false
 	theUrl := COMMANDS["xkcd"].How
 	if len(args) < 1 {
 		theUrl = "https://xkcd.com/"
 		latest = true
-	} else if _, err := strconv.Atoi(args); err == nil {
-		result = "https://xkcd.com/" + args
+	} else if _, err := strconv.Atoi(args[0]); err == nil {
+		result = "https://xkcd.com/" + args[0]
 		return
 	} else {
-		theUrl += "process?action=xkcd&query=" + url.QueryEscape(args)
+		theUrl += "process?action=xkcd&query=" + url.QueryEscape(args[0])
 	}
 
 	data := getURLContents(theUrl, nil)
@@ -3309,7 +3386,7 @@ func cmdXkcd(r Recipient, chName, args string) (result string) {
 	return
 }
 
-func cmdYubifail(r Recipient, chName, args string) (result string) {
+func cmdYubifail(r Recipient, chName string, args []string) (result string) {
 	result = getCountable("yubifail", chName, r, args)
 	return
 }
@@ -3320,7 +3397,7 @@ func cmdYubifail(r Recipient, chName, args string) (result string) {
 
 func argcheck(flag string, args []string, i int) {
 	if len(args) <= (i + 1) {
-		fail(fmt.Sprintf("'%v' needs an argument\n", flag))
+		fail("'%v' needs an argument\n", flag)
 	}
 }
 
@@ -3344,6 +3421,11 @@ func createCommands() {
 		"builtin",
 		"!8ball <question>",
 		nil}
+	COMMANDS["alerts"] = &Command{cmdAlerts,
+		"display alert settings and help",
+		"builtin",
+		"!alerts [cmr-alert|jira-alert|snow-alert]",
+		nil}
 	COMMANDS["asn"] = &Command{cmdAsn,
 		"display information about ASN",
 		"whois -h whois.cymru.com",
@@ -3353,11 +3435,6 @@ func createCommands() {
 		"everybody needs more bacon",
 		"mostly pork",
 		"!bacon",
-		nil}
-	COMMANDS["beer"] = &Command{cmdBeer,
-		"quench your thirst",
-		"https://www.beeradvocate.com/",
-		"!beer <beer>",
 		nil}
 	COMMANDS["bs"] = &Command{cmdBs,
 		"Corporate B.S. Generator",
@@ -3439,11 +3516,6 @@ func createCommands() {
 		"http://www.pangloss.com/seidel/Shaker/index.html",
 		"!insult <somebody>",
 		nil}
-	COMMANDS["jira"] = &Command{cmdJira,
-		"display info about a jira ticket",
-		URLS["jira"] + "/rest/api/latest/issue/",
-		"!jira <ticket>",
-		nil}
 	COMMANDS["latlong"] = &Command{cmdLatLong,
 		"look up latitude and longitude for a given location",
 		"https://www.latlong.net/",
@@ -3477,8 +3549,8 @@ func createCommands() {
 	COMMANDS["oncall"] = &Command{cmdOncall,
 		"show who's oncall",
 		"Service Now & OpsGenie",
-		"!oncall [<group>]\nIf <group> is not specified, this uses the channel name.\nUse '!set oncall=<rotation name>' to change the default.",
-		[]string{"on_call"}}
+		"!oncall [<group>]\nIf <group> is not specified, this uses the channel name.\nUse '!set oncall=<rotation-name>' to change the default.\nIf your <rotation name> contains spaces, you have to quote the argument ('!set oncall=\"<rotation name>\"').\n\nIf you invoke the command and follow it with multiple arguments ('!oncall please look at ticket 12345'), then I will @-mention the current oncall for the rotation set in the channel and point them to your message.\n\nIf your channel does not have an oncall rotation and you want to have me reply to users with some other message, use '!set noncall=\"your message here\", and I will give people \"your message here\" when they run '!oncall'.\n\n",
+		[]string{"on_call", "on-call"}}
 	COMMANDS["onion"] = &Command{cmdOnion,
 		"get your finest news headlines",
 		"https://www.theonion.com/",
@@ -3719,7 +3791,7 @@ func doTheHipChat() {
 	var err error
 	HIPCHAT_CLIENT, err = hipchat.NewClient(user, pass, "bot", authType)
 	if err != nil {
-		fail(fmt.Sprintf("Client error: %s\n", err))
+		fail("Client error: %s\n", err)
 	}
 
 	HIPCHAT_CLIENT.Status("chat")
@@ -3768,9 +3840,6 @@ func doTheHipChat() {
 
 func doTheSlackChat() {
 	SLACK_CLIENT = slack.New(CONFIG["slackToken"])
-	if CONFIG["debug"] == "yes" {
-		SLACK_CLIENT.SetDebug(true)
-	}
 
 	SLACK_RTM = SLACK_CLIENT.NewRTM()
 	go SLACK_RTM.ManageConnection()
@@ -3791,8 +3860,12 @@ Loop:
 		select {
 		case msg := <-SLACK_RTM.IncomingEvents:
 			switch ev := msg.Data.(type) {
+
 			case *slack.ChannelJoinedEvent:
 				processSlackChannelJoin(ev)
+
+			case *slack.ChannelRenameEvent:
+				processSlackChannelRename(ev)
 
 			case *slack.InvalidAuthEvent:
 				fmt.Fprintf(os.Stderr, "Unable to authenticate.")
@@ -3800,6 +3873,9 @@ Loop:
 
 			case *slack.MessageEvent:
 				processSlackMessage(ev)
+
+			case *slack.RateLimitEvent:
+				processSlackRateLimit(ev)
 
 			case *slack.RTMError:
 				fmt.Fprintf(os.Stderr, "Slack error: %s\n", ev.Error())
@@ -3825,8 +3901,8 @@ func expandSlackUser(in string) (u *slack.User) {
 	return
 }
 
-func fail(msg string) {
-	fmt.Fprintf(os.Stderr, msg)
+func fail(format string, v ...interface{}) {
+	fmt.Fprintf(os.Stderr, format+"\n", v...)
 	os.Exit(EXIT_FAILURE)
 }
 
@@ -3942,6 +4018,7 @@ func getChannelInfo(id string) (info string) {
 			return
 		}
 		ch = *c
+		ch.Members = []string{}
 	}
 
 	topic := ""
@@ -4049,7 +4126,6 @@ func getRecipientFromMessage(mfrom string, chatType string) (r Recipient) {
 		 * "user" component, then we have a
 		 * privmsg, which is a private
 		 * channel. */
-
 		index := 0
 		if strings.HasPrefix(mfrom, "@") {
 			index = 1
@@ -4103,6 +4179,8 @@ func getSortedKeys(hash map[string]int, rev bool) (sorted []string) {
 }
 
 /* Additional arguments can influence how the request is made:
+ * - if args["auth"] is "x509", then the URL requires x509 client a cert / key
+ *   from CONFIG["x509Cert"] and CONFIG["x509Key"]
  * - if args["by"] is "true", then the URL requires access credentials
  * - if args["corp"] is "true", then the URL requires a second type of credentials
  * - if args["ua"] is "true", then we fake the User-Agent
@@ -4111,22 +4189,38 @@ func getSortedKeys(hash map[string]int, rev bool) (sorted []string) {
  * - if any args["header"] is set, use that value to set the given header
  *   set the given 'key=value' headers
  */
-func getURLContents(givenUrl string, args map[string]string) (data []byte) {
-	verbose(3, "Fetching %s...", givenUrl)
-	jar, err := cookiejar.New(nil)
+func getURLContents(givenURL string, args map[string]string) (data []byte) {
+	verbose(3, "Fetching %s...", givenURL)
+
+	u, err := url.Parse(givenURL)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to initialize cookie jar: %s\n", err)
+		fmt.Fprintf(os.Stderr, "Unable to parse url '%s': %s\n", givenURL, err)
 		return
 	}
 
-	u, err := url.Parse(givenUrl)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to parse url '%s': %s\n", givenUrl, err)
-		return
+	client := &http.Client{}
+
+	if x509, ok := args["auth"]; ok && x509 == "x509" {
+		if len(CONFIG["x509Cert"]) < 1 || len(CONFIG["x509Key"]) < 1 {
+			fmt.Fprintf(os.Stderr, "URL '%s' requires an x509 cert/key, but none found in config.\n", givenURL)
+			return
+		}
+
+		client = mtls.NewClient(mtls.Config{
+			Cert: CONFIG["x509Cert"],
+			Key:  CONFIG["x509Key"],
+		})
 	}
 
 	if by, ok := args["by"]; ok && by == "true" {
-		_, err := bouncer.CheckLogin(givenUrl, COOKIES)
+
+		jar, err := cookiejar.New(nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Unable to initialize cookie jar: %s\n", err)
+			return
+		}
+
+		_, err = bouncer.CheckLogin(givenURL, COOKIES)
 		if err != nil {
 			if !strings.Contains(err.Error(), "URL mismatch") {
 				fmt.Fprintf(os.Stderr, "+++ bouncer.CheckLogin failed: %s\n", err.Error())
@@ -4146,15 +4240,15 @@ func getURLContents(givenUrl string, args map[string]string) (data []byte) {
 			COOKIES = c
 		}
 		jar.SetCookies(u, COOKIES)
+
+		client = &http.Client{
+			Jar: jar,
+		}
 	}
 
-	client := http.Client{
-		Jar: jar,
-	}
-
-	request, err := http.NewRequest("GET", givenUrl, nil)
+	request, err := http.NewRequest("GET", givenURL, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to create new request for '%s': %s\n", givenUrl, err)
+		fmt.Fprintf(os.Stderr, "Unable to create new request for '%s': %s\n", givenURL, err)
 		return
 	}
 
@@ -4179,7 +4273,7 @@ func getURLContents(givenUrl string, args map[string]string) (data []byte) {
 
 	response, err := client.Do(request)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to GET '%s': %s\n", givenUrl, err)
+		fmt.Fprintf(os.Stderr, "Unable to GET '%s': %s\n", givenURL, err)
 		return
 	}
 
@@ -4187,7 +4281,7 @@ func getURLContents(givenUrl string, args map[string]string) (data []byte) {
 
 	data, err = ioutil.ReadAll(response.Body)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to read body of '%s': %s\n", givenUrl, err)
+		fmt.Fprintf(os.Stderr, "Unable to read body of '%s': %s\n", givenURL, err)
 		return
 	}
 
@@ -4202,7 +4296,14 @@ func getURLContents(givenUrl string, args map[string]string) (data []byte) {
  * These are handled in 'cmdTop':
  * !top countable -> top 5 countableers
  */
-func getCountable(which, chName string, r Recipient, wanted string) (result string) {
+func getCountable(which, chName string, r Recipient, args []string) (result string) {
+	wanted := ""
+	if len(args) > 1 {
+		result = "Too many arguments."
+		return
+	} else if len(args) == 1 {
+		wanted = args[0]
+	}
 	verbose(3, "Getting %s count for %s in %s, looking for %s...", which, r.MentionName, chName, wanted)
 
 	channelLookup := false
@@ -4396,6 +4497,15 @@ func leave(r Recipient, channelFound bool, msg string, command bool) {
 	return
 }
 
+func listContains(list []string, item string) bool {
+	for _, i := range list {
+		if i == item {
+			return true
+		}
+	}
+	return false
+}
+
 func locationToTZ(l string) (result string, success bool) {
 	success = false
 
@@ -4408,7 +4518,7 @@ func locationToTZ(l string) (result string, success bool) {
 	lat := "0.0"
 	lng := "0.0"
 
-	latlon := cmdLatLong(Recipient{}, "", l)
+	latlon := cmdLatLong(Recipient{}, "", []string{l})
 	if !strings.Contains(latlon, ",") {
 		result = "Unknown location."
 		return
@@ -4481,7 +4591,7 @@ func parseConfig() {
 	verbose(1, "Parsing config file '%s'...", fname)
 	fd, err := os.Open(fname)
 	if err != nil {
-		fail(fmt.Sprintf("Unable to open '%s': %v\n", fname, err))
+		fail("Unable to open '%s': %v\n", fname, err)
 	}
 	defer fd.Close()
 
@@ -4508,8 +4618,8 @@ func parseConfig() {
 
 		keyval := strings.Split(line, "=")
 		if len(keyval) != 2 {
-			fail(fmt.Sprintf("Invalid line in configuration file '%s', line %d.",
-				fname, n))
+			fail("Invalid line in configuration file '%s', line %d.",
+				fname, n)
 		} else {
 			key := strings.TrimSpace(keyval[0])
 			val := strings.TrimSpace(keyval[1])
@@ -4558,6 +4668,17 @@ func parseConfig() {
 			fail("Please set 'mentionName' and 'slackToken'.")
 		}
 	}
+
+	fileOptions := []string{"x509Cert", "x509Key"}
+	for _, f := range fileOptions {
+		if len(CONFIG[f]) > 0 {
+			fh, err := os.Open(CONFIG[f])
+			if err != nil {
+				fail("Unable to open %s file '%s': %q\n", f, CONFIG[f], err)
+			}
+			fh.Close()
+		}
+	}
 }
 
 func hcPeriodics() {
@@ -4581,7 +4702,6 @@ func processCommands(r Recipient, invocation, line string) {
 	defer catchPanic()
 
 	who := r.ReplyTo
-
 	ch, channelFound := getChannel(r.ChatType, r.ReplyTo)
 	if channelFound {
 		who = ch.Name
@@ -4591,7 +4711,13 @@ func processCommands(r Recipient, invocation, line string) {
 		}
 	}
 
-	args := strings.Fields(line)
+	line = replaceFancyQuotes(line)
+
+	args, err := shlex.Split(line)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to shlex.Split(%s): %s\n", line, err)
+		args = strings.Fields(line)
+	}
 	if len(args) < 1 {
 		rand.Seed(time.Now().UnixNano())
 		replies := []string{
@@ -4666,7 +4792,7 @@ func processCommands(r Recipient, invocation, line string) {
 			if rex.MatchString(cmd) {
 				return
 			}
-			response = cmdHelp(r, r.ReplyTo, cmd)
+			response = cmdHelp(r, r.ReplyTo, []string{cmd})
 		} else if channelFound {
 			processChatter(r, line, true)
 			return
@@ -4680,7 +4806,7 @@ func processCommands(r Recipient, invocation, line string) {
 			if ch, found := getChannel(r.ChatType, r.ReplyTo); found {
 				chName = ch.Name
 			}
-			response = COMMANDS[cmd].Call(r, chName, strings.Join(args, " "))
+			response = COMMANDS[cmd].Call(r, chName, args)
 		} else {
 			fmt.Fprintf(os.Stderr, "'nil' function for %s?\n", cmd)
 			return
@@ -4763,7 +4889,6 @@ func processMessage(r Recipient, msg string) {
 	p += ")"
 
 	command_re := regexp.MustCompile(p)
-
 	if command_re.MatchString(msg) {
 		matchEnd := command_re.FindStringIndex(msg)[1]
 		processCommands(r, msg[0:matchEnd], msg[matchEnd:])
@@ -4776,9 +4901,40 @@ func processSlackChannelJoin(ev *slack.ChannelJoinedEvent) {
 	jbotDebug(fmt.Sprintf("Join: %v\n", ev))
 }
 
+func processSlackChannelRename(ev *slack.ChannelRenameEvent) {
+	newName := ev.Channel.Name
+	id := ev.Channel.ID
+	verbose(1, "Renaming '<%s>' to '#%s'...", id, newName)
+	if _, found := CHANNELS[newName]; found {
+		fmt.Fprintf(os.Stderr, "Renamed channel '%s' already found?\n", newName)
+		return
+	}
+
+	for oldName, chInfo := range CHANNELS {
+		if chInfo.Id == id {
+			verbose(2, "Renaming '#%s' to '#%s'...", oldName, newName)
+			delete(CHANNELS, oldName)
+			chInfo.Name = newName
+			CHANNELS[newName] = chInfo
+			break
+		}
+	}
+}
+
 func processSlackInvite(r Recipient, name string, msg *slack.MessageEvent) {
 	if strings.Contains(msg.Text, "<@"+CONFIG["slackID"]+">") {
-		ch := newSlackChannel(name, msg.Channel, msg.Inviter)
+		slackChannel, err := SLACK_CLIENT.GetConversationInfo(msg.Channel, false)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Unable to SLACK_CLIENT.GetConversationInfo(%s): %s\n",
+				msg.Channel, err)
+			return
+		}
+		if slackChannel.IsExtShared {
+			fmt.Fprintf(os.Stderr, "Refusing to join externally shared channel '%s' (%s).\n",
+				slackChannel.Name, msg.Channel)
+			return
+		}
+		ch := newSlackChannel(name, msg.Channel, msg.User)
 		verbose(2, "I was invited into Slack '%s' (%s) by '%s'.", ch.Name, ch.Id, ch.Inviter)
 		CHANNELS[ch.Name] = &ch
 		rand.Seed(time.Now().UnixNano())
@@ -4829,7 +4985,22 @@ func processSlackMessage(msg *slack.MessageEvent) {
 
 	txt := msg.Text
 	if msg.SubType == "message_changed" {
+		/* When unfirling a link, Slack effectively updates
+		 * the original message, so it shows up here again
+		 * with an attachment.  Let's simply ignore any
+		 * edited messages with attachments to avoid processing
+		 * it twice. */
+		if len(msg.SubMessage.Attachments) > 0 {
+			return
+		}
+
 		txt = msg.SubMessage.Text
+		/* Edited messages come from the channel only,
+		 * so we need to reconstruct the recipient from
+		 * the submessage.  That will yield a no-channel
+		 * recipient, however, so we reuse the original
+		 * channel to avoid sending a privmsg. */
+		r = getRecipientFromMessage(fmt.Sprintf("%s@%s", msg.SubMessage.User, msg.Channel), "slack")
 	}
 
 	/* E.g. threads and replies get a dupe event with
@@ -4854,6 +5025,10 @@ func processSlackMessage(msg *slack.MessageEvent) {
 	txt = SLACK_UNLINK_RE1.ReplaceAllString(txt, "${3}")
 	txt = SLACK_UNLINK_RE2.ReplaceAllString(txt, "${1}")
 	processMessage(r, txt)
+}
+
+func processSlackRateLimit(ev *slack.RateLimitEvent) {
+	fmt.Fprintf(os.Stderr, "%v\n", ev)
 }
 
 func processSlackUserChangeEvent(ev *slack.UserChangeEvent) {
@@ -4921,7 +5096,7 @@ func readSavedData() {
 
 	b, err := ioutil.ReadFile(CONFIG["channelsFile"])
 	if err != nil {
-		fail(fmt.Sprintf("Error %s: %q\n", CONFIG["channelsFile"], err))
+		fail("Error %s: %q\n", CONFIG["channelsFile"], err)
 	}
 
 	buf := bytes.Buffer{}
@@ -4929,7 +5104,7 @@ func readSavedData() {
 
 	d := gob.NewDecoder(&buf)
 	if err := d.Decode(&CHANNELS); err != nil {
-		fail(fmt.Sprintf("Unable to decode data: %s\n", err))
+		fail("Unable to decode data: %s\n", err)
 	}
 
 	verbose(2, "Reading saved data from: %s", CONFIG["countersFile"])
@@ -4939,7 +5114,7 @@ func readSavedData() {
 
 	b, err = ioutil.ReadFile(CONFIG["countersFile"])
 	if err != nil {
-		fail(fmt.Sprintf("Error %s: %q\n", CONFIG["countersFile"], err))
+		fail("Error %s: %q\n", CONFIG["countersFile"], err)
 	}
 
 	buf = bytes.Buffer{}
@@ -4947,8 +5122,27 @@ func readSavedData() {
 
 	d = gob.NewDecoder(&buf)
 	if err := d.Decode(&COUNTERS); err != nil {
-		fail(fmt.Sprintf("Unable to decode data: %s\n", err))
+		fail("Unable to decode data: %s\n", err)
 	}
+}
+
+func replaceFancyQuotes(in string) (out string) {
+	out = in
+
+	/* The Slack App replaces regular ascii quotes
+	 * (0x22 and 0x27) with fancy unicode quotes,
+	 * presumably based on locale.  This messes up
+	 * our own shlex splitting later on, so undo
+	 * that mess here. */
+	out = strings.Replace(out, "“", "\"", -1)
+	out = strings.Replace(out, "”", "\"", -1)
+	out = strings.Replace(out, "‟", "\"", -1)
+	out = strings.Replace(out, "„", "\"", -1)
+	out = strings.Replace(out, "‘", "'", -1)
+	out = strings.Replace(out, "’", "'", -1)
+	out = strings.Replace(out, "‛", "'", -1)
+	out = strings.Replace(out, "‚", "'", -1)
+	return
 }
 
 func reply(r Recipient, msg string) {
@@ -4982,6 +5176,9 @@ func reply(r Recipient, msg string) {
 			if last_index == 0 {
 				last_index = strings.LastIndex(m1, " ")
 			}
+			if last_index == 0 {
+				last_index = strings.LastIndex(m1, ",")
+			}
 			if last_index > 0 {
 				m1 = msg[:last_index-1]
 				msg = msg[last_index+1:]
@@ -4991,6 +5188,7 @@ func reply(r Recipient, msg string) {
 			} else {
 				SLACK_RTM.SendMessage(SLACK_RTM.NewOutgoingMessage("Message too long, truncating...\n", recipient))
 				SLACK_RTM.SendMessage(SLACK_RTM.NewOutgoingMessage(msg[:SLACK_MAX_LENGTH-1], recipient))
+				msg = msg[SLACK_MAX_LENGTH:]
 			}
 		}
 		msg = fontFormat(channelName, msg)
@@ -5076,6 +5274,20 @@ func serializeData() {
 			CONFIG["countersFile"], err)
 		return
 	}
+
+	memfile := CONFIG["memfile"]
+	if len(memfile) > 0 {
+		f, err := os.Create(memfile)
+		if err != nil {
+			fail("Unable to create memory profile: %s\n", err)
+		}
+		defer f.Close()
+		runtime.GC()
+		verbose(2, "Writing memory profile...")
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			fail("Unable to write memory profile: %s\n", err)
+		}
+	}
 }
 
 func sendMailSMTP(from string, to, cc []string, subject, body string) (errstr string) {
@@ -5100,8 +5312,9 @@ func sendMailSMTP(from string, to, cc []string, subject, body string) (errstr st
 func slackChannelPeriodics() {
 	verbose(2, "Running slack channel periodics...")
 	for _, chInfo := range CHANNELS {
-		snowAlert(*chInfo)
 		cveAlert(*chInfo)
+		snowAlerts(*chInfo)
+		jiraAlert(*chInfo, false)
 	}
 }
 
@@ -5163,6 +5376,10 @@ func updateSlackChannels() {
 			break
 		}
 		for _, c := range channels {
+			/* Let's not try to keep in
+			 * memory a map of all users
+			 * in all channels... */
+			c.Members = []string{}
 			SLACK_CHANNELS[c.Name] = c
 		}
 		if len(cursor) > 0 {
@@ -5285,6 +5502,35 @@ func updateChannels() {
 			delete(CHANNELS, n)
 			continue
 		}
+
+		if !ch.Verified {
+		RATE_LIMIT_LOOP:
+			verbose(3, "Trying to get info on %s (%s)...\n", n, ch.Id)
+			slackChannel, err := SLACK_CLIENT.GetConversationInfo(ch.Id, false)
+			if err != nil {
+				if rateLimitedError, ok := err.(*slack.RateLimitedError); ok {
+					verbose(3, "Sleeping for rate limit %d seconds...", rateLimitedError.RetryAfter)
+					time.Sleep(rateLimitedError.RetryAfter * time.Second)
+					goto RATE_LIMIT_LOOP
+				}
+				fmt.Fprintf(os.Stderr, "Unable to SLACK_CLIENT.GetConversationInfo(%s): %s\n",
+					ch.Id, err)
+				if fmt.Sprintf("%s", err) == "channel_not_found" {
+					fmt.Fprintf(os.Stderr, "Removing myself from no-longer found channel '%s' (%s).\n",
+						n, ch.Id)
+					delete(CHANNELS, n)
+				}
+				continue
+			}
+			if slackChannel.IsExtShared {
+				fmt.Fprintf(os.Stderr, "Removing myself from externally shared channel '%s' (%s).\n",
+					slackChannel.Name, ch.Id)
+				delete(CHANNELS, n)
+				continue
+			}
+			ch.Verified = true
+		}
+
 		for t, v := range TOGGLES {
 			if len(ch.Toggles) == 0 {
 				ch.Toggles = map[string]bool{}
@@ -5320,8 +5566,8 @@ func verbose(level int, format string, v ...interface{}) {
 
 func main() {
 
-	if err := os.Setenv("PATH", "/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin"); err != nil {
-		fail(fmt.Sprintf("Unable to set PATH: %s\n", err))
+	if err := os.Setenv("PATH", "/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/home/y/bin:/home/y/sbin:/home/y/bin64"); err != nil {
+		fail("Unable to set PATH: %s\n", err)
 	}
 
 	getopts()

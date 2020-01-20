@@ -13,6 +13,8 @@ import (
 
 var DONTKNOW = []string{
 	"How the hell am I supposed to know that?",
+	"Why waste time learning, when ignorance is instantaneous?",
+	"This one's tricky. You have to use imaginary numbers, like eleventeen...",
 	"FIIK",
 	"ENOCLUE",
 	"Buh?",
@@ -22,6 +24,7 @@ var DONTKNOW = []string{
 	"You don't know??",
 	"Oh, uhm, ...I don't know. Do you?",
 	"I could tell you, but then I'd have to kill you.",
+	"Look, all I know is that Gucci is way overprized.",
 	"Wouldn't you like to know.",
 	"You're a curious little hip-chatter, aren't you?\nUhm, no, wait, I mean: slacker. You're a slacker, that's it. A curious one.",
 	"I'm sorry, that's classified.",
@@ -106,6 +109,8 @@ var THANKYOU = []string{
 	"Glad to be of service.",
 	"I appreciate your appreciation.",
 	"Thank you!",
+	":gucci-1530",
+	"We gucci.",
 	"Thanks - this channel is my life!",
 	"_blushes._",
 	"_giddily hops up and down._",
@@ -122,9 +127,12 @@ type ElizaResponse struct {
 }
 
 func init() {
+	URLS["animals"] = "http://localhost/animals"
 	URLS["eliza"] = "http://localhost/eliza"
+	URLS["insects"] = "http://localhost/bugs"
 	URLS["schneier"] = "http://localhost/schneier"
 	URLS["shakespeare"] = "http://localhost/shakespeare"
+	URLS["swquotes"] = "http://localhost/swquotes"
 }
 
 func chatterEliza(msg string, r Recipient) (result string) {
@@ -133,31 +141,31 @@ func chatterEliza(msg string, r Recipient) (result string) {
 	eliza := []*ElizaResponse{
 		&ElizaResponse{regexp.MustCompile(`(?i)(buen dia|bon ?(jour|soir)|welcome|hi,|hey|hello|good (morning|afternoon|evening)|howdy|aloha|guten (tag|morgen|abend))`), append([]string{
 			"Oh great, you're back.",
-			fmt.Sprintf("Howdy, @%s. I trust the events of the day have not had a negative impact on your mood?", r.MentionName),
-			fmt.Sprintf("Get the party started, y'all -- @%s is back!", r.MentionName),
+			fmt.Sprintf("Howdy, <@%s>. I trust the events of the day have not had a negative impact on your mood?", r.Id),
+			fmt.Sprintf("Get the party started, y'all -- <@%s> is back!", r.Id),
 			"Oh, I didn't see you there. Welcome!",
-			fmt.Sprintf("Aloha, @%s!", r.MentionName),
+			fmt.Sprintf("Aloha, <@%s>!", r.Id),
 			"Greetings, fellow chatterinos!",
-			fmt.Sprintf("_hugs @%s._\nI missed you!", r.MentionName),
-			fmt.Sprintf("Oh, hi there, @%s!", r.MentionName),
+			fmt.Sprintf("_hugs <@%s>._\nI missed you!", r.Id),
+			fmt.Sprintf("Oh, hi there, <@%s>!", r.Id),
 		}, HELLO...)},
 		&ElizaResponse{regexp.MustCompile(`(?i)(have a (nice|good)|adios|au revoir|sayonara|bye( ?bye)?|later|good(bye| ?night)|hasta (ma.ana|luego))`), append([]string{
 			"Stay a while, why don't you?",
 			"It was a pleasure to have you here.",
-			fmt.Sprintf("Don't leave us, @%s!", r.MentionName),
-			fmt.Sprintf("This channel will be much less exciting without you, @%s.", r.MentionName),
-			fmt.Sprintf("See you later, @%s.", r.MentionName),
-			fmt.Sprintf("_waves goodbye to @%s._", r.MentionName),
+			fmt.Sprintf("Don't leave us, <@%s>!", r.Id),
+			fmt.Sprintf("This channel will be much less exciting without you, <@%s>.", r.Id),
+			fmt.Sprintf("See you later, <@%s>.", r.Id),
+			fmt.Sprintf("_waves goodbye to <@%s>._", r.Id),
 		}, GOODBYE...)},
 		&ElizaResponse{regexp.MustCompile(`(?i)(thx|thanks?|danke|mahalo|gracias|merci|спасибо|[D]dziękuję)`), []string{
-			fmt.Sprintf("It's been my pleasure, @%s.", r.MentionName),
-			fmt.Sprintf("You're welcome, @%s!", r.MentionName),
-			fmt.Sprintf("At your service, @%s!", r.MentionName),
-			fmt.Sprintf("Bitte schön, @%s!", r.MentionName),
-			fmt.Sprintf("De nada, @%s!", r.MentionName),
-			fmt.Sprintf("De rien, @%s!", r.MentionName),
-			fmt.Sprintf("Пожалуйста, @%s!", r.MentionName),
-			fmt.Sprintf("Proszę bardzo, @%s!", r.MentionName),
+			fmt.Sprintf("It's been my pleasure, <@%s>.", r.Id),
+			fmt.Sprintf("You're welcome, <@%s>!", r.Id),
+			fmt.Sprintf("At your service, <@%s>!", r.Id),
+			fmt.Sprintf("Bitte schön, <@%s>!", r.Id),
+			fmt.Sprintf("De nada, <@%s>!", r.Id),
+			fmt.Sprintf("De rien, <@%s>!", r.Id),
+			fmt.Sprintf("Пожалуйста, <@%s>!", r.Id),
+			fmt.Sprintf("Proszę bardzo, <@%s>!", r.Id),
 			"_takes a bow._",
 			"Always happy to help.",
 		}},
@@ -174,6 +182,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"What do you think about machines?",
 			"Why do you mention computers?",
 			"The Robots are Coming! The Robots are Coming!",
+			"It's psychosomatic. You need a lobotomy. I'll get a saw.",
 			"Sounds too complicated.",
 			":bad_robot:",
 			":robot:",
@@ -252,7 +261,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"Can you think of anybody in particular?",
 		}},
 		&ElizaResponse{regexp.MustCompile(`(?i)(how ((will|can|[cw]ould) (yo)?u) help)|(what (can|do) you do)|(how do (I|we) use you)`), []string{
-			cmdHelp(r, "", ""),
+			cmdHelp(r, "", []string{}),
 		}},
 		&ElizaResponse{regexp.MustCompile(`(?i)((please )? help)|((will|can|[cw]ould) (yo)?u)`), []string{
 			"Sure, why not?",
@@ -312,20 +321,20 @@ func chatterEliza(msg string, r Recipient) (result string) {
 			"I don't, but I know somebody who does.",
 			"We all do, though some of us prefer to keep that private.",
 			"Not in public.",
-			fmt.Sprintf("I could ask you the same question, @%s!", r.MentionName),
+			fmt.Sprintf("I could ask you the same question, <@%s>!", r.Id),
 		}},
 		&ElizaResponse{regexp.MustCompile(`(?i)((is|isn't|does|doesn't|has|hasn't|had) (not|never))|(seems( not)? to)`), []string{
 			"Hey, I'm right here!",
 			"I can hear you, you know.",
 			"Maybe, maybe not.",
 			"You'll never know.",
-			fmt.Sprintf("_saves a snarky remark for when @%s is afk._", r.MentionName),
-			fmt.Sprintf("_ignores @%s._", r.MentionName),
+			fmt.Sprintf("_saves a snarky remark for when <@%s> is afk._", r.Id),
+			fmt.Sprintf("_ignores <@%s>._", r.Id),
 		}},
 		&ElizaResponse{regexp.MustCompile(`(?i)sudo (\S+)`), []string{
-			fmt.Sprintf("@%s is not in the sudoers file.\nThis incident will be reported.\n", r.MentionName),
-			fmt.Sprintf("@%s is not allowed to run sudo on Slack.\nThis incident will be reported.\n", r.MentionName),
-			fmt.Sprintf("Sorry, user @%s is not allowed to execute '<1>' as jbot on Slack.\nThis incident will be reported.\n", r.MentionName),
+			fmt.Sprintf("<@%s> is not in the sudoers file.\nThis incident will be reported.\n", r.Id),
+			fmt.Sprintf("<@%s> is not allowed to run sudo on Slack.\nThis incident will be reported.\n", r.Id),
+			fmt.Sprintf("Sorry, user <@%s> is not allowed to execute '<1>' as jbot on Slack.\nThis incident will be reported.\n", r.Id),
 			fmt.Sprintf("Ignoring \"<1>\" found in '.'\nUse \"./<1>\" if this is the \"<1>\" you wish to run.\n"),
 			fmt.Sprintf("<1>: command not found\n"),
 			"Touch Yubikey:",
@@ -355,6 +364,7 @@ func chatterEliza(msg string, r Recipient) (result string) {
 		result = randomLineFromUrl(URLS["praise"], false)
 	} else {
 		result = randomLineFromUrl(URLS["eliza"], false)
+		result = strings.Replace(result, "<@>", fmt.Sprintf("<@%s>", r.Id), -1)
 	}
 	return
 }
@@ -363,8 +373,8 @@ func chatterAtnoyance(msg string, ch *Channel, r Recipient) (result string) {
 	if strings.Contains(msg, "<!channel>") {
 		if slackChannel, err := SLACK_CLIENT.GetChannelInfo(ch.Id); err == nil {
 			num := len(getAllMembersInChannel(slackChannel.ID))
-			result = fmt.Sprintf("To all the %d users who were just notified courtesy of @%s:\n",
-				num, r.MentionName)
+			result = fmt.Sprintf("To all the %d users who were just notified courtesy of <@%s>:\n",
+				num, r.Id)
 		}
 		result += "You can adjust your notification settings on a per-channel basis. :idea2:\n"
 		result += "Click channel name -> Notifications Preferences -> 'Ignore notifications for...'\n"
@@ -400,12 +410,30 @@ func chatterDrWho(msg string) (result string) {
 		"You were fantastic. Absolutely fantastic. And you know what? So was I.",
 	}
 
-	anypattern := regexp.MustCompile(`(?i)(d(r\.?|octor) who|pandorica|sonic screwdriver|tardis|dalek|weeping angel|silurian|strax|madame vastra|paternoster|bowtie|spoilers)`)
+	anypattern := regexp.MustCompile(`(?i)(d(r\.?|octor) who|torchwood|cyberm[ea]n|time lord|pandorica|sonic screwdriver|dalek|weeping angel|silurian|strax|madame vastra|paternoster|bowtie|spoilers)`)
 
 	if anypattern.MatchString(msg) {
 		return anyreply[rand.Intn(len(anyreply))]
 	}
 
+	return
+}
+
+func chatterFlight(msg string, ch *Channel, r Recipient) (result string) {
+	flight_re := regexp.MustCompile(`([A-Z]+)\s*(:[^:]*plane[^:]*:|✈️)\s*([A-Z]+)`)
+	m := flight_re.FindStringSubmatch(msg)
+	from := ""
+	to := ""
+	if len(m) > 0 {
+		from = m[1]
+		to = m[3]
+		cmd := from + " " + to
+		result = cmdFlight(r, ch.Name, []string{cmd})
+	}
+
+	if len(result) > 0 && strings.HasPrefix(result, "Sorry") {
+		result = ""
+	}
 	return
 }
 
@@ -425,12 +453,20 @@ func chatterH2G2(msg string) (result string) {
 		"Life... is like a grapefruit. It's orange and squishy, and has a few pips in it, and some folks have half a one for breakfast.",
 		"Except most of the good bits were about frogs, I remember that.  You would not believe some of the things about frogs.",
 		"There was an accident with a contraceptive and a time machine. Now concentrate!",
+		"Do people want fire that can be fitted nasally?",
+		"Don't give any money to the unicorns, it only encourages them.",
+		"Think before you pluck. Irresponsible plucking costs lives.",
+		"My doctor says that I have a malformed public-duty gland and a natural deficiency in moral fibre.",
+		"Once you know what it is you want to be true, instinct is a very useful device for enabling you to know that it is.",
 		"It is very easy to be blinded to the essential uselessness of them by the sense of achievement you get from getting them to work at all.",
 		"Life: quite interesting in parts, but no substitute for the real thing",
 		"I love deadlines. I like the whooshing sound they make as they fly by.",
 		"What do you mean, why has it got to be built? It's a bypass. Got to build bypasses.",
 		"Time is an illusion, lunchtime doubly so.",
 		"DON'T PANIC",
+		"Very deep. You should send that in to the Reader's Digest. They've got a page for people like you.",
+		"I am now a perfectly safe penguin, and my colleague here is rapidly running out of limbs!",
+		"You're so weird you should be in movies.",
 		"I am so hip I have difficulty seeing over my pelvis.",
 		"I'm so amazingly cool you could keep a side of meat inside me for a month.",
 		"Listen, three eyes, don't you try to outweird me.  I get stranger things than you free with my breakfast cereal.",
@@ -460,20 +496,20 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	if len(m) > 0 {
 		m[1] = strings.Replace(m[1], fmt.Sprintf(" @%s", CONFIG["mentionName"]), "", -1)
 		if !isThrottled("holdon", ch) {
-			result = fmt.Sprintf("No *YOU* %s, @%s!", m[1], r.MentionName)
+			result = fmt.Sprintf("No *YOU* %s, <@%s>!", m[1], r.Id)
 			return
 		}
 	}
 
 	trivia_re := regexp.MustCompile(`(trivia|factlet|anything interesting.*\?)`)
 	if trivia_re.MatchString(msg) && ch.Toggles["trivia"] && !isThrottled("trivia", ch) {
-		reply(r, cmdTrivia(r, r.ReplyTo, ""))
+		reply(r, cmdTrivia(r, r.ReplyTo, []string{}))
 		return
 	}
 
 	oncall := regexp.MustCompile(`(?i)^who('?s| is) on ?call\??$`)
 	if oncall.MatchString(msg) {
-		result = cmdOncall(r, ch.Name, "")
+		result = cmdOncall(r, ch.Name, []string{})
 		return
 	}
 
@@ -525,7 +561,9 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 			"That's the combination on my luggage!",
 			"Wait, was that military grade encryption?",
 			"You don't exist. Go away.",
+			"Does not compute. Does not compute. Does not compute.",
 			"Ugh, you really screwed up this time.",
+			"Looks like a Gucci promo code.",
 			"Biological interface error.",
 			"Error: the operation completed successfully.",
 			"Keyboard not responding. Press any key to continue.",
@@ -537,10 +575,13 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 			":yubikey-1648:",
 			"You should double-rot13 that.",
 			"Uh-oh, now you're pwned.",
-			fmt.Sprintf("@%s s/^eidcc[a-z]*$/whoops/", r.MentionName),
+			fmt.Sprintf("<@%s> s/^eidcc[a-z]*$/whoops/", r.Id),
 			"Access denied!",
+			"Yubi harder!",
 			"Please try again later.",
 			"IF YOU DON'T SEE THE FNORD IT CAN'T EAT YOU",
+			fmt.Sprintf("Nice. This brings your total #yubifail count to %s.",
+				strings.TrimSpace(cmdYubifail(r, ch.Name, []string{r.MentionName}))),
 		}
 		result = replies[rand.Intn(len(replies))]
 	}
@@ -593,7 +634,7 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	if bananas.MatchString(msg) && !isThrottled("bananas", ch) {
 		replies := []string{
 			"Ooooh ooh, this my shit, this my shit.",
-			fmt.Sprintf("@%s ain't no hollaback girl.", r.MentionName),
+			fmt.Sprintf("<@%s> ain't no hollaback girl.", r.Id),
 			"Let me hear you say this shit is bananas.",
 			"B-A-N-A-N-A-S",
 		}
@@ -615,13 +656,13 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 
 	speb := regexp.MustCompile(`(?i)security ((problem )?excuse )?bingo`)
 	if speb.MatchString(msg) && !isThrottled("speb", ch) {
-		result = cmdSpeb(r, ch.Name, "")
+		result = cmdSpeb(r, ch.Name, []string{})
 		return
 	}
 
-	beer := regexp.MustCompile(`(?i)b[ie]er( me)?$`)
+	beer := regexp.MustCompile(`(?i)^b[ie]er( me)?$`)
 	if beer.MatchString(msg) {
-		result = cmdBeer(r, ch.Name, "")
+		result = cmdBeer(r, ch.Name, []string{})
 	}
 
 	ed := regexp.MustCompile(`(?i)(editor war)|(emacs.*vi)|(vi.*emacs)|((best|text) (text[ -]?)?editor)`)
@@ -664,32 +705,8 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 
 	corpbs_re := regexp.MustCompile(`((c-level|corporate|business|manage(r|ment)|marketing) (bullshit|bs|jargon|speak|lingo))|synergize`)
 	if corpbs_re.MatchString(msg) && ch.Toggles["corpbs"] && !isThrottled("corpbs", ch) {
-		reply(r, cmdBs(r, r.ReplyTo, "chatter"))
+		reply(r, cmdBs(r, r.ReplyTo, []string{"chatter"}))
 		return
-	}
-
-	trump_re := regexp.MustCompile(`(?i)(hillary|mexican border|ivanka|melania|rosie o'donnel|health care|border security|worst president|#maga|tax evasion|impeach|major asshole|sexist pig|pennsylvania avenue)`)
-	if trump_re.MatchString(msg) && !isThrottled("trump", ch) {
-		replies := []string{
-			"They don't write good. They don't know how to write good.",
-			"Such a nasty woman.",
-			"Nobody knew health care could be so complicated.",
-			"I need loyalty, I expect loyalty.",
-			"Great president. Most people don't even know he was a Republican.",
-			"That makes me smart.",
-			"I, like, have a very good brain.",
-			"I alone can fix it.",
-			"Happy Cinco de Mayo! The best taco bowls are made in Trump Tower Grill. I love Hispanics!",
-			"DO NOT CONGRATULATE",
-			"I'm really good at war. I love war in a certain way.",
-			"The beauty of me is that I'm very rich.",
-			"Nobody builds walls better than me, believe me.",
-			"I don't think I've made mistakes.",
-			"Let me tell you, I'm a really smart guy.",
-			"My fingers are long and beautiful, as, it has been well been documented, are various other parts of my body.",
-			"I'm speaking with myself, number one, because I have a very good brain and I've said a lot of things.",
-		}
-		result = replies[rand.Intn(len(replies))]
 	}
 
 	fnord_re := regexp.MustCompile(`(?i)fnord`)
@@ -735,9 +752,24 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 			"Life is short, eat more donuts!",
 			"/donut",
 			"/donut @jbot",
-			fmt.Sprintf("/donut @%s", r.MentionName),
+			fmt.Sprintf("/donut <@%s>", r.Id),
 		}
 		result = replies[rand.Intn(len(replies))]
+	}
+
+	swquote_re := regexp.MustCompile(`(?i)(program.*wisdom|murphy.*law|fred.*brooks|((dijkstra|kernighan|knuth|pike|thompson|ritchie).*quote))`)
+	if swquote_re.MatchString(msg) && !isThrottled("swquotes", ch) {
+		result = randomLineFromUrl(URLS["swquotes"], false)
+	}
+
+	insects_re := regexp.MustCompile(`(?i)(insect|cockroach|drosophila|weevil|butterfly|honeybee|aphid)`)
+	if insects_re.MatchString(msg) && !isThrottled("insects", ch) {
+		result = randomLineFromUrl(URLS["insects"], false)
+	}
+
+	animals_re := regexp.MustCompile(`(?i)(mammal|lobster|chicken|koala|opossum|flamingo|giraffe|armadillo)`)
+	if animals_re.MatchString(msg) && !isThrottled("animals", ch) {
+		result = randomLineFromUrl(URLS["animals"], false)
 	}
 
 	return
@@ -748,15 +780,15 @@ func chatterMontyPython(msg string) (result string) {
 
 	result = ""
 	patterns := map[*regexp.Regexp]string{
-		regexp.MustCompile("(?i)(a|the|which|of) swallow"):                                          "An African or European swallow?",
+		regexp.MustCompile("(?i)(a|the|which|of) swallow"):                                   "An African or European swallow?",
 		regexp.MustCompile("(?i)(excalibur|lady of the lake|magical lake|avalon|\bdruid\b)"): "Strange women lying in ponds distributing swords is no basis for a system of government!",
-		regexp.MustCompile("(?i)(Judean People's Front|People's Front of Judea)"):                   "Splitters.",
-		regexp.MustCompile("(?i)really very funny"):                                                 "I don't think there's a punch-line scheduled, is there?",
-		regexp.MustCompile("(?i)inquisition"):                                                       "Oehpr Fpuarvre rkcrpgf gur Fcnavfu Vadhvfvgvba.",
-		regexp.MustCompile("(?i)say no more"):                                                       "Nudge, nudge, wink, wink. Know what I mean?",
-		regexp.MustCompile("(?i)Romanes eunt domus"):                                                "'People called Romanes they go the house?'",
-		regexp.MustCompile("(?i)(correct|proper) latin"):                                            "Romani ite domum.",
-		regexp.MustCompile("(?i)hungarian"):                                                         "My hovercraft is full of eels.",
+		regexp.MustCompile("(?i)(Judean People's Front|People's Front of Judea)"):            "Splitters.",
+		regexp.MustCompile("(?i)really very funny"):                                          "I don't think there's a punch-line scheduled, is there?",
+		regexp.MustCompile("(?i)inquisition"):                                                "Oehpr Fpuarvre rkcrpgf gur Fcnavfu Vadhvfvgvba.",
+		regexp.MustCompile("(?i)say no more"):                                                "Nudge, nudge, wink, wink. Know what I mean?",
+		regexp.MustCompile("(?i)Romanes eunt domus"):                                         "'People called Romanes they go the house?'",
+		regexp.MustCompile("(?i)(correct|proper) latin"):                                     "Romani ite domum.",
+		regexp.MustCompile("(?i)hungarian"):                                                  "My hovercraft is full of eels.",
 	}
 
 	anypattern := regexp.MustCompile("(?i)(camelot|cleese|monty|snake|serpent)")
@@ -820,10 +852,11 @@ func chatterSeinfeld(msg string) (result string) {
 
 	anyreply := []string{
 		"Just remember, it's not a lie if you believe it.",
+		"So I see you're sticking with the denim, huh?",
 		"If you're not gonna be a part of a civil society, then just get in your car and drive on over to the East Side.",
 		"I lie every second of the day. My whole life is a sham.",
 		"Somewhere in this hospital, the anguished squeal of Pigman cries out!",
-		"Did you know that the original title for War and Peace was War, What Is It Good For?",
+		"Did you know that the original title for 'War and Peace' was 'War, What Is It Good For'?",
 		"Moles -- freckles' ugly cousin.",
 		"Oh yeah? Well the jerk store called. They're running outta you.",
 		"Just let me ask you something. Is it 'FebRUary' or 'FebUary'? Because I prefer 'FebUary,' and what is this 'ru'?",
@@ -858,11 +891,12 @@ func chatterSeinfeld(msg string) (result string) {
 func processChatter(r Recipient, msg string, forUs bool) {
 	var chitchat string
 
-	yo := "(@?" + CONFIG["mentionName"]
-	if r.ChatType == "slack" {
-		yo += "|<@" + CONFIG["slackID"] + ">"
-	}
-	yo += ")"
+	yo := "(@?" + CONFIG["mentionName"] + ")"
+	/* We can't use "\b", because that doesn't
+	 * match e.g., "<@1234>" because "<" or "@"
+	 * are not non-word boundary chars. */
+	mentioned_re := regexp.MustCompile(`(?i)[^a-z0-9_/-]` + yo + `[^a-z0-9_/-]`)
+	forUs_re := regexp.MustCompile(`(?i)([^a-z0-9_/-]<@` + CONFIG["slackID"] + `[^a-z0-9_/-])|(^` + CONFIG["mentionName"] + `|` + CONFIG["mentionName"] + `$)`)
 
 	/* If we received a message but can't find the
 	 * channel, then it must have been a priv
@@ -877,8 +911,7 @@ func processChatter(r Recipient, msg string, forUs bool) {
 		}
 		return
 	} else if !forUs {
-		direct_re := regexp.MustCompile("(?i)\b" + yo + "\b")
-		forUs = direct_re.MatchString(msg)
+		forUs = forUs_re.MatchString(msg)
 	}
 
 	jbotDebug(fmt.Sprintf("%v in %s: %s - %v", r, ch.Name, msg, forUs))
@@ -891,7 +924,7 @@ func processChatter(r Recipient, msg string, forUs bool) {
 	insult_re := regexp.MustCompile(fmt.Sprintf("(?i)^(%s[,:]? *)(please )?insult ", yo))
 	if insult_re.MatchString(msg) {
 		target := strings.SplitN(msg, "insult ", 2)
-		reply(r, cmdInsult(r, r.ReplyTo, target[1]))
+		reply(r, cmdInsult(r, r.ReplyTo, []string{target[1]}))
 		return
 	}
 
@@ -901,16 +934,9 @@ func processChatter(r Recipient, msg string, forUs bool) {
 	 * be enabled.  If a message contains our
 	 * name, then we may respond only if 'chatter'
 	 * is not toggled off. */
-	mentioned_re := regexp.MustCompile(fmt.Sprintf("(?i)(^( *|yo,? ?|hey,? ?)%s[,:]?)|(,? *%s *[.?!]?$)|(.* *%s *[.?!].*)", yo, yo, yo))
 	mentioned := mentioned_re.MatchString(msg)
-	if strings.Contains(msg, "@"+CONFIG["mentionName"]) {
-		mentioned = true
-	}
-	if r.ChatType == "slack" {
-		yo = "<@" + CONFIG["slackID"] + ">"
-		if strings.Contains(msg, yo) {
-			mentioned = true
-		}
+	if mentioned && isThrottled("mentioned", ch) {
+		mentioned = false
 	}
 
 	jbotDebug(fmt.Sprintf("forUs: %v; chatter: %v; mentioned: %v\n", forUs, ch.Toggles["chatter"], mentioned))
@@ -922,13 +948,13 @@ func processChatter(r Recipient, msg string, forUs bool) {
 		if len(m[2]) > 0 {
 			arg = "all"
 		}
-		reply(r, cmdHelp(r, r.ReplyTo, arg))
+		reply(r, cmdHelp(r, r.ReplyTo, []string{arg}))
 		return
 	}
 
 	if wasInsult(msg) && (forUs ||
 		(ch.Toggles["chatter"] && mentioned)) {
-		reply(r, cmdInsult(r, r.ReplyTo, "me"))
+		reply(r, cmdInsult(r, r.ReplyTo, []string{"me"}))
 		return
 	}
 
@@ -978,6 +1004,12 @@ func processChatter(r Recipient, msg string, forUs bool) {
 
 		chitchat = chatterAtnoyance(msg, ch, r)
 		if (len(chitchat) > 0) && ch.Toggles["atnoyance"] && !isThrottled("atnoyance", ch) {
+			reply(r, chitchat)
+			return
+		}
+
+		chitchat = chatterFlight(msg, ch, r)
+		if len(chitchat) > 0 {
 			reply(r, chitchat)
 			return
 		}

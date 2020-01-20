@@ -48,22 +48,23 @@ func init() {
 		[]string{"ssllab"}}
 }
 
-func cmdSsllabs(r Recipient, chName, args string) (result string) {
+func cmdSsllabs(r Recipient, chName string, args []string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["ssllabs"].Usage
 		return
 	}
+	input := strings.Join(args, " ")
 
-	args = strings.TrimPrefix(args, "https://")
-	args = strings.TrimSuffix(args, "/")
+	input = strings.TrimPrefix(input, "https://")
+	input = strings.TrimSuffix(input, "/")
 
-	args = fqdn(args)
-	if _, err := net.LookupHost(args); err != nil {
+	input = fqdn(input)
+	if _, err := net.LookupHost(input); err != nil {
 		result = "Sorry, that does not seem to resolve right now."
 		return
 	}
 
-	theURL := COMMANDS["ssllabs"].How + url.QueryEscape(args)
+	theURL := COMMANDS["ssllabs"].How + url.QueryEscape(input)
 	ssllabs := getSsllabsResults(theURL)
 
 	if ssllabs.Status != "READY" {
@@ -72,7 +73,7 @@ func cmdSsllabs(r Recipient, chName, args string) (result string) {
 			return
 		}
 
-		result = fmt.Sprintf("'%s' submitted to SSLLabs for analysis", args)
+		result = fmt.Sprintf("'%s' submitted to SSLLabs for analysis", input)
 		if ssllabs.Status != "DNS" {
 			result += fmt.Sprintf("; currently in status '%s'", ssllabsStatusMessage(ssllabs))
 		}

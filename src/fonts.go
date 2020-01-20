@@ -13,6 +13,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 type FontFunc func(string) string
@@ -42,7 +43,7 @@ func init() {
 		nil}
 }
 
-func cmdFont(r Recipient, chName, args string) (result string) {
+func cmdFont(r Recipient, chName string, args []string) (result string) {
 	result = "Usage: " + COMMANDS["font"].Usage + "\n"
 	result += "I know the following fonts:\n"
 
@@ -62,21 +63,21 @@ func cmdFont(r Recipient, chName, args string) (result string) {
 		return
 	}
 
-	if _, found := FONTS[args]; !found {
+	if _, found := FONTS[args[0]]; !found {
 		return
 	}
 
-	result = cmdSet(r, chName, "font="+args)
+	result = cmdSet(r, chName, []string{"font=" + args[0]})
 	return
 }
 
-func cmdRot13(r Recipient, chName, args string) (result string) {
+func cmdRot13(r Recipient, chName string, args []string) (result string) {
 	if len(args) < 1 {
 		result = "Usage: " + COMMANDS["rot13"].Usage + "\n"
 		return
 	}
 
-	result = rot13Text(args)
+	result = rot13Text(strings.Join(args, " "))
 	return
 }
 

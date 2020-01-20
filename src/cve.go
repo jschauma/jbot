@@ -105,9 +105,10 @@ func init() {
 		nil}
 }
 
-func cmdCve(r Recipient, chName, args string) (result string) {
-	cves := strings.Split(args, " ")
-	if len(args) < 1 || len(cves) != 1 {
+func cmdCve(r Recipient, chName string, args []string) (result string) {
+	input := strings.Join(args, " ")
+	cves := args
+	if len(cves) != 1 {
 		result = "Usage: " + COMMANDS["cve"].Usage
 		return
 	}
@@ -130,9 +131,9 @@ func cmdCve(r Recipient, chName, args string) (result string) {
 	err := json.Unmarshal(data, &cveData)
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "invalid character") {
-			result = fmt.Sprintf("No CVE data found for '%s'.\n", args)
+			result = fmt.Sprintf("No CVE data found for '%s'.\n", input)
 			result += "Perhaps that CVE is still not public in MITRE?\n"
-			result += "https://cve.mitre.org/cgi-bin/cvename.cgi?name=" + args
+			result += "https://cve.mitre.org/cgi-bin/cvename.cgi?name=" + input
 		} else {
 			result = fmt.Sprintf("Unable to unmarshal cveapi data: %s\n", err)
 		}
