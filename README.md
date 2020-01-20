@@ -642,7 +642,7 @@ Go 1.3
 
 ### Installation:
 ```
-go build jbot.go
+make
 install -c -m 755 jbot /somewhere/in/your/path/jbot
 ```
 
