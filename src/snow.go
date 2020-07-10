@@ -13,10 +13,10 @@ import (
 	"strings"
 )
 
-var SNOW_ALERTS = []string{ "cmr-alert", "snow-alert" }
+var SNOW_ALERTS = []string{"cmr-alert", "snow-alert"}
 
 func init() {
-	ALERTS["cmr-alert"] =  "-c"
+	ALERTS["cmr-alert"] = "-c"
 	ALERTS["snow-alert"] = "-s"
 
 	COMMANDS["cmrs"] = &Command{cmdCmrs,
@@ -226,11 +226,4 @@ func snowAlert(chInfo Channel, alert string) {
 
 	counter_num += 1
 	chInfo.Settings[alert+"-counter"] = fmt.Sprintf("%d", counter_num)
-}
-
-func cmdOncallSnow(r Recipient, chName string, args []string) (result string) {
-	cmd := []string{"oncall", "-u", CONFIG["mentionName"], strings.Join(args, " ")}
-	out, _ := runCommand(cmd...)
-	result = string(out)
-	return
 }

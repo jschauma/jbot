@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -16,6 +18,13 @@ const SLEEP_TIME = 5
 
 func init() {
 	URLS["opsgenie"] = "https://api.opsgenie.com/v2/"
+	URLS["directory"] = "https://XXXdirectoryURLXXX"
+
+	COMMANDS["oncall"] = &Command{cmdOncall,
+		"show who's oncall",
+		"Service Now & OpsGenie",
+		"!oncall [<group>]\nIf <group> is not specified, this uses the channel name.\nUse '!set oncall=<rotation-name>' to change the default.\nIf your <rotation name> contains spaces, you have to quote the argument ('!set oncall=\"<rotation name>\"').\nYou can also specify multiple rotations by separating them with a comma (','); this works for both explicit invocations as well as for channel settings.\n\nIf you invoke the command and follow it with multiple arguments ('!oncall please look at ticket 12345'), then I will @-mention the current oncall for the rotation set in the channel and point them to your message.\n\nIf your channel does not have an oncall rotation and you want to have me reply to users with some other message, use '!set noncall=\"your message here\", and I will give people \"your message here\" when they run '!oncall'.\n\n",
+		[]string{"on_call", "on-call"}}
 }
 
 type OpsGenieScheduleInfo struct {
@@ -31,11 +40,105 @@ type OpsGenieApiData struct {
 	Data    interface{}
 }
 
+func cmdOncall(r Recipient, chName string, args []string) (result string) {
+	input := strings.Join(args, " ")
+
+	var oncall string
+	var noncall string
+	if len(args) == 1 {
+		oncall = args[0]
+	}
+	oncall_source := "user input"
+
+	atMention := false
+	uparrow_re := regexp.MustCompile(`(?i)^(-*\^+|https?://)`)
+	if uparrow_re.Match([]byte(input)) || len(args) > 1 {
+		atMention = true
+		oncall = ""
+	}
+
+	if len(oncall) < 1 {
+		if ch, found := getChannel(r.ChatType, r.ReplyTo); found {
+			if r.ChatType == "hipchat" {
+				oncall = r.ReplyTo
+			} else {
+				oncall = ch.Name
+			}
+			oncall_source = "channel name"
+			if v, found := ch.Settings["oncall"]; found {
+				oncall = v
+				oncall_source = "channel setting"
+			}
+			noncall, _ = ch.Settings["noncall"]
+		} else if !atMention {
+			result = "Usage: " + COMMANDS["oncall"].Usage
+			return
+		}
+	}
+
+	for n, rot := range strings.Split(oncall, ",") {
+
+		oncallFound := true
+		if n > 0 {
+			result += "\n---\n"
+		}
+		result += cmdOncallOpsGenie(r, chName, rot, true)
+		if len(result) < 1 {
+			result = fmt.Sprintf("No oncall information found for '%s'.\n", oncall)
+			oncallFound = false
+		}
+		if strings.HasPrefix(result, "No OpsGenie schedule found for") {
+			oncallFound = false
+		}
+
+		if !oncallFound {
+			if len(noncall) > 0 && oncall_source != "user input" {
+				result = noncall
+				continue
+			}
+			switch oncall_source {
+			case "channel name":
+				result += fmt.Sprintf("\nIf your oncall rotation does not match your channel name (%s), use '!set oncall=<rotation_name>'.\n", chName)
+			case "channel setting":
+				result += fmt.Sprintf("\nIs your 'oncall' channel setting (%s) correct?\n", oncall)
+				result += "If not, use '!set oncall=<rotation_name>' to fix that.\n"
+			}
+		}
+
+		if atMention {
+			user_re := regexp.MustCompile(fmt.Sprintf("(?i)%s/([^|]+)", URLS["directory"])
+			if m := user_re.FindAllStringSubmatch(result, -1); len(m) > 0 {
+				users := map[string]bool{}
+				for _, u := range m {
+					user, err := SLACK_CLIENT.GetUserByEmail(u[1] + "@" + CONFIG["emailDomain"])
+					if err == nil {
+						users[fmt.Sprintf("<@%s>", user.ID)] = true
+					}
+				}
+				if len(users) > 0 {
+					var keys []string
+					for k, _ := range users {
+						keys = append(keys, k)
+					}
+					sort.Strings(keys)
+
+					result = ""
+					for _, k := range keys {
+						result += k + " "
+					}
+					result += " --^"
+				}
+			}
+		}
+
+	}
+	return
+}
+
 func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (result string) {
 	var candidates []string
 	scheduleFound := false
 	wantedName := args
-	originalWantedName := wantedName
 	scheduleURL := "https://app.opsgenie.com/schedule#/"
 
 	if len(CONFIG["opsgenieApiKey"]) < 1 {
@@ -74,7 +177,7 @@ LabelLookup:
 		participants := ogOncalls.Data.(map[string]interface{})["onCallParticipants"].([]interface{})
 		if len(participants) > 0 {
 			scheduleFound = true
-			if (tname != sname) {
+			if tname != sname {
 				result += fmt.Sprintf("Team %s: Schedule ", tname)
 			}
 			result += fmt.Sprintf("<%s%s|%s>:\n", scheduleURL, sid, sname)
@@ -90,10 +193,9 @@ LabelLookup:
 		for _, t := range rotationTeams {
 			wantedName = t
 			goto LabelLookup
-			wantedName = originalWantedName
 		}
 
-		if (!scheduleFound) {
+		if !scheduleFound {
 			result = fmt.Sprintf("Team '%s' schedule '%s' found in OpsGenie, but nobody's currently oncall.\n", tname, sname)
 			result += fmt.Sprintf("%s%s\n", scheduleURL, sid)
 
@@ -138,7 +240,7 @@ func getOpsgenieAPIData(url string) (ogData OpsGenieApiData) {
 	urlArgs := map[string]string{"Authorization": "GenieKey " + key}
 LabelOncalls:
 	data := getURLContents(url, urlArgs)
-	sleepCount := 1;
+	sleepCount := 1
 
 	err := json.Unmarshal(data, &ogData)
 	if err != nil {
@@ -225,11 +327,11 @@ func opsgenieUserDetails(u string) (details string) {
 	if i < 0 {
 		i = len(u)
 	}
-	if (ogu.Data == nil) {
+	if ogu.Data == nil {
 		return
 	}
 
-	details = fmt.Sprintf("<https://directory.vzbuilders.com/view/vzm/%s|%s> (%s", u[:i], ogu.Data.(map[string]interface{})["fullName"].(string), u)
+	details = fmt.Sprintf("<%s/%s|%s> (%s", URLS["directory"], u[:i], ogu.Data.(map[string]interface{})["fullName"].(string), u)
 	for _, c := range ogu.Data.(map[string]interface{})["userContacts"].([]interface{}) {
 		if c.(map[string]interface{})["contactMethod"].(string) == "voice" {
 			details += fmt.Sprintf(", %s", c.(map[string]interface{})["to"].(string))

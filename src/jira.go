@@ -18,15 +18,15 @@ var JIRA_REST = "/rest/api/latest"
 
 type JiraFilterResult struct {
 	ErrorMessages []string
-	Jql string
-	Name string
-	ViewUrl string
+	Jql           string
+	Name          string
+	ViewUrl       string
 }
 
 type JiraSearchResult struct {
-	Issues []struct{
+	Issues []struct {
 		Fields struct {
-			Created string
+			Created  string
 			Reporter struct {
 				Name string
 			}
@@ -41,7 +41,7 @@ type JiraSearchResult struct {
 
 func init() {
 	ALERTS["jira-alert"] = "true"
-	URLS["jira"] = "https://jira.vzbuilders.com"
+	URLS["jira"] = "https://jira.XXXYOURDOMAINXXX.com"
 
 	COMMANDS["jira"] = &Command{cmdJira,
 		"display info about a jira ticket",
@@ -107,7 +107,6 @@ func cmdJira(r Recipient, chName string, args []string) (result string) {
 	result += fmt.Sprintf("%s/browse/%s", URLS["jira"], ticket)
 	return
 }
-
 
 func jiraAlert(chInfo Channel, printFilter bool) {
 	alertSettings, found := chInfo.Settings["jira-alert"]
@@ -188,7 +187,7 @@ func jiraFilter(chInfo Channel, filterId int, printFilter bool) {
 
 	if len(filter.ErrorMessages) > 0 {
 		msg := strings.Join(filter.ErrorMessages, "\n")
-		msg  += fmt.Sprintf("Review filter settings at %ssecure/EditFilter!default.jspa?filterId=%d", URLS["jira"], filterId)
+		msg += fmt.Sprintf("Review filter settings at %ssecure/EditFilter!default.jspa?filterId=%d", URLS["jira"], filterId)
 		reply(r, msg)
 		return
 	}
@@ -232,10 +231,10 @@ func jiraSearch(jql string) (result string) {
 		summary = strings.ReplaceAll(summary, ">", "&gt;")
 		summary = strings.ReplaceAll(summary, "<", "&lt;")
 		result += fmt.Sprintf("<%s/browse/%s|%s: %s> (Reporter: %s, Opened at: %s)\n",
-						URLS["jira"], ticket.Key,
-						ticket.Key, summary,
-						ticket.Fields.Reporter,
-						ticket.Fields.Created)
+			URLS["jira"], ticket.Key,
+			ticket.Key, summary,
+			ticket.Fields.Reporter,
+			ticket.Fields.Created)
 	}
 
 	return

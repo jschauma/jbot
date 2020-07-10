@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -359,26 +360,12 @@ func chatterEliza(msg string, r Recipient) (result string) {
 
 	n := rand.Intn(10)
 	if n == 1 {
-		result = randomLineFromUrl(URLS["insults"], false)
+		result = randomLineFromUrl(URLS["insults"])
 	} else if n < 4 {
-		result = randomLineFromUrl(URLS["praise"], false)
+		result = randomLineFromUrl(URLS["praise"])
 	} else {
-		result = randomLineFromUrl(URLS["eliza"], false)
+		result = randomLineFromUrl(URLS["eliza"])
 		result = strings.Replace(result, "<@>", fmt.Sprintf("<@%s>", r.Id), -1)
-	}
-	return
-}
-
-func chatterAtnoyance(msg string, ch *Channel, r Recipient) (result string) {
-	if strings.Contains(msg, "<!channel>") {
-		if slackChannel, err := SLACK_CLIENT.GetChannelInfo(ch.Id); err == nil {
-			num := len(getAllMembersInChannel(slackChannel.ID))
-			result = fmt.Sprintf("To all the %d users who were just notified courtesy of <@%s>:\n",
-				num, r.Id)
-		}
-		result += "You can adjust your notification settings on a per-channel basis. :idea2:\n"
-		result += "Click channel name -> Notifications Preferences -> 'Ignore notifications for...'\n"
-		result += "(Don't like this message? '!toggle atnoyance'.)"
 	}
 	return
 }
@@ -491,7 +478,7 @@ func chatterH2G2(msg string) (result string) {
 func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 	rand.Seed(time.Now().UnixNano())
 
-	holdon := regexp.MustCompile(`(?i)^((hold|hang) on([^[:punct:],.]*))`)
+	holdon := regexp.MustCompile(`(?i)^((hold|hang) on( to.*)?)`)
 	m := holdon.FindStringSubmatch(msg)
 	if len(m) > 0 {
 		m[1] = strings.Replace(m[1], fmt.Sprintf(" @%s", CONFIG["mentionName"]), "", -1)
@@ -525,28 +512,30 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 		return
 	}
 
-	wutang := regexp.MustCompile(`(?i)(tang|wu-|shaolin|kill(er|ah) bee[sz]|liquid sword|cuban lin(ks|x))`)
-	noattang := regexp.MustCompile(`(?i)@\w*tang`)
-	if wutang.MatchString(msg) && !noattang.MatchString(msg) && !isThrottled("wutang", ch) {
-		replies := []string{
-			"Do you think your Wu-Tang sword can defeat me?",
-			"En garde, I'll let you try my Wu-Tang style.",
-			"It's our secret. Never teach the Wu-Tang!",
-			"How dare you rebel the Wu-Tang Clan against me.",
-			"We have only 35 Chambers. There is no 36.",
-			"If what you say is true the Shaolin and the Wu-Tang could be dangerous.",
-			"Toad style is immensely strong and immune to nearly any weapon.",
-			"You people are all trying to achieve the impossible.",
-			"Your faith in Shaolin is courageous.",
-			"Make it brief son: half short, twice strong!",
-			"I have given it much thought. It seems disaster must come at best only postponed.",
-			"Are you my judge?",
-			"Cash rules everything around me: CREAM, get the money. Dollar, dollar bill y’all.",
-			"Peace is the absence of confusion.",
+	/*
+		wutang := regexp.MustCompile(`(?i)(tang|wu-|shaolin|kill(er|ah) bee[sz]|liquid sword|cuban lin(ks|x))`)
+		noattang := regexp.MustCompile(`(?i)@\w*tang`)
+		if wutang.MatchString(msg) && !noattang.MatchString(msg) && !isThrottled("wutang", ch) {
+			replies := []string{
+				"Do you think your Wu-Tang sword can defeat me?",
+				"En garde, I'll let you try my Wu-Tang style.",
+				"It's our secret. Never teach the Wu-Tang!",
+				"How dare you rebel the Wu-Tang Clan against me.",
+				"We have only 35 Chambers. There is no 36.",
+				"If what you say is true the Shaolin and the Wu-Tang could be dangerous.",
+				"Toad style is immensely strong and immune to nearly any weapon.",
+				"You people are all trying to achieve the impossible.",
+				"Your faith in Shaolin is courageous.",
+				"Make it brief son: half short, twice strong!",
+				"I have given it much thought. It seems disaster must come at best only postponed.",
+				"Are you my judge?",
+				"Cash rules everything around me: CREAM, get the money. Dollar, dollar bill y’all.",
+				"Peace is the absence of confusion.",
+			}
+			result = replies[rand.Intn(len(replies))]
+			return
 		}
-		result = replies[rand.Intn(len(replies))]
-		return
-	}
+	*/
 
 	yubifail := regexp.MustCompile(`eiddcc[a-z]{38}`)
 	if yubifail.MatchString(msg) && !isThrottled("yubifail", ch) {
@@ -580,8 +569,11 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 			"Yubi harder!",
 			"Please try again later.",
 			"IF YOU DON'T SEE THE FNORD IT CAN'T EAT YOU",
-			fmt.Sprintf("Nice. This brings your total #yubifail count to %s.",
-				strings.TrimSpace(cmdYubifail(r, ch.Name, []string{r.MentionName}))),
+		}
+		yubicount := cmdYubifail(r, ch.Name, []string{r.MentionName})
+		if n, err := strconv.Atoi(yubicount); err == nil && n > 3 {
+			replies = append(replies,
+				fmt.Sprintf("Nice. This brings your total #yubifail count to %s.", yubicount))
 		}
 		result = replies[rand.Intn(len(replies))]
 	}
@@ -606,13 +598,13 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 
 	shakespeare := regexp.MustCompile(`(?i)(shakespear|hamlet|macbeth|romeo and juliet|merchant of venice|midsummer night's dream|henry V|as you like it|All's Well That Ends Well|Comedy of Errors|Cymbeline|Love's Labours Lost|Measure for Measure|Merry Wives of Windsor|Much Ado About Nothing|Pericles|Prince of Tyre|Taming of the Shrew|Tempest|Troilus|Cressida|(Twelf|)th Night|gentlemen of verona|Winter's tale|henry IV|king john|richard II|anth?ony and cleopatra|coriolanus|julius caesar|king lear|othello|timon of athens|titus|andronicus)`)
 	if shakespeare.MatchString(msg) && ch.Toggles["shakespeare"] && !isThrottled("shakespeare", ch) {
-		result = gothicText(randomLineFromUrl(URLS["shakespeare"], false))
+		result = gothicText(randomLineFromUrl(URLS["shakespeare"]))
 		return
 	}
 
 	schneier := regexp.MustCompile(`(?i)(schneier|blowfish|skein)`)
 	if schneier.MatchString(msg) && ch.Toggles["schneier"] && !isThrottled("schneier", ch) {
-		result = randomLineFromUrl(URLS["schneier"], false)
+		result = randomLineFromUrl(URLS["schneier"])
 		return
 	}
 
@@ -721,9 +713,9 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 		result = replies[rand.Intn(len(replies))]
 	}
 
-	homer_re := regexp.MustCompile(`(?i)(\bpie\b|danish|donuts|duff|beer)`)
-	if !isThrottled("homer", ch) {
-		if m := homer_re.FindStringSubmatch(msg); len(m) > 0 {
+	homer_re := regexp.MustCompile(`(?i)(\bpie\b|danish|duff|beer)`)
+	if m := homer_re.FindStringSubmatch(msg); len(m) > 0 {
+		if !isThrottled("homer", ch) {
 			replies := []string{
 				"Mmmmmm, " + m[1] + "!",
 				"Ah, " + m[1] + ", my one weakness. My Achilles heel, if you will.",
@@ -759,17 +751,17 @@ func chatterMisc(msg string, ch *Channel, r Recipient) (result string) {
 
 	swquote_re := regexp.MustCompile(`(?i)(program.*wisdom|murphy.*law|fred.*brooks|((dijkstra|kernighan|knuth|pike|thompson|ritchie).*quote))`)
 	if swquote_re.MatchString(msg) && !isThrottled("swquotes", ch) {
-		result = randomLineFromUrl(URLS["swquotes"], false)
+		result = randomLineFromUrl(URLS["swquotes"])
 	}
 
 	insects_re := regexp.MustCompile(`(?i)(insect|cockroach|drosophila|weevil|butterfly|honeybee|aphid)`)
 	if insects_re.MatchString(msg) && !isThrottled("insects", ch) {
-		result = randomLineFromUrl(URLS["insects"], false)
+		result = randomLineFromUrl(URLS["insects"])
 	}
 
 	animals_re := regexp.MustCompile(`(?i)(mammal|lobster|chicken|koala|opossum|flamingo|giraffe|armadillo)`)
 	if animals_re.MatchString(msg) && !isThrottled("animals", ch) {
-		result = randomLineFromUrl(URLS["animals"], false)
+		result = randomLineFromUrl(URLS["animals"])
 	}
 
 	return
@@ -822,7 +814,7 @@ func chatterMontyPython(msg string) (result string) {
 
 func chatterParrotParty(msg string) (result string) {
 	if m, _ := regexp.MatchString("(?i)parrot *party", msg); m {
-		result = randomLineFromUrl(URLS["parrots"], false)
+		result = randomLineFromUrl(URLS["parrots"])
 	}
 	return
 }
@@ -998,12 +990,6 @@ func processChatter(r Recipient, msg string, forUs bool) {
 
 		chitchat = chatterPhish(msg, ch, r)
 		if len(chitchat) > 0 {
-			reply(r, chitchat)
-			return
-		}
-
-		chitchat = chatterAtnoyance(msg, ch, r)
-		if (len(chitchat) > 0) && ch.Toggles["atnoyance"] && !isThrottled("atnoyance", ch) {
 			reply(r, chitchat)
 			return
 		}

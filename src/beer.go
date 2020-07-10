@@ -23,13 +23,11 @@ func init() {
 
 func cmdBeer(r Recipient, chName string, args []string) (result string) {
 	bType := "search"
-	theUrl := fmt.Sprintf("%ssearch/?qt=beer&q=", COMMANDS["beer"].How)
+	theUrl := fmt.Sprintf("%ssearch/?q=", COMMANDS["beer"].How)
 	if len(args) < 1 {
 		bType = "top"
-		theUrl = fmt.Sprintf("%slists/top/", COMMANDS["beer"].How)
-	}
-
-	if args[0] == "me" {
+		theUrl = fmt.Sprintf("%sbeer/top-rated/", COMMANDS["beer"].How)
+	} else if args[0] == "me" {
 		args[0] = r.MentionName
 	}
 
@@ -49,7 +47,7 @@ func cmdBeer(r Recipient, chName string, args []string) (result string) {
 
 	var beer Beer
 
-	beer_re := regexp.MustCompile(`<a href="/(beer/profile/[0-9]+/[0-9]+/)"><span[^>]+>([^<]+)</span></a><br><span[^>]+><a href="/beer/profile/[0-9]+/">([^<]+)</a>`)
+	beer_re := regexp.MustCompile(`<a href="/(beer/profile/[0-9]+/[0-9]+/)"><b>([^<]+)</b></a><span[^>]+><br><a href="/beer/profile/[0-9]+/">([^<]+)</a>`)
 	top_re := regexp.MustCompile(`<a href="/(beer/profile/[0-9]+/[0-9]+/)"><b>([^<]+)</b></a><span[^>]+><br><a href="/beer/profile/[0-9]+/">([^<]+)</a><br><a href="/beer/top-rated/[0-9]+/">([^<]+)</a> \| ([0-9.]+%)</span></td><td.+><b>([0-9.]+)</b>`)
 
 	nextField := ""
@@ -75,9 +73,10 @@ func cmdBeer(r Recipient, chName string, args []string) (result string) {
 				beer = Beer{"", "", m[3], m[2], "", m[1]}
 				theUrl = fmt.Sprintf("%s%s", COMMANDS["beer"].How, m[1])
 				data2 = getURLContents(theUrl, nil)
-			} else if strings.Contains(line, "<title>"+wantedBeer) {
-				beer = Beer{"", "", "", wantedBeer, "", ""}
-				data2 = data
+				/*			} else if strings.Contains(line, "<title>"+wantedBeer) {
+							beer = Beer{"", "", "", wantedBeer, "", ""}
+							data2 = data
+				*/
 			}
 
 			if len(data2) > 0 {
