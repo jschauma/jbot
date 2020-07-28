@@ -5,6 +5,7 @@ clean::
 
 SOURCES= \
         src/jbot.go             \
+        src/afk.go           	\
         src/athere.go           \
         src/autoreply.go        \
         src/beer.go             \

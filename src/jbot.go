@@ -109,6 +109,7 @@ var SLACK_UNLINK_RE1 = regexp.MustCompile("(<https?://([^|]+)\\|([^>]+)>)")
 var SLACK_UNLINK_RE2 = regexp.MustCompile("<(https?://[^>]+)>")
 
 var CONFIG = map[string]string{
+	"afkFile":              "/var/tmp/jbot.afk",
 	"botOwner":             "",
 	"byUser":               "",
 	"byPassword":           "",
@@ -184,6 +185,13 @@ var COUNTERS = map[string]map[string]int{
 	"thanked":   map[string]int{},
 	"yubifail":  map[string]int{},
 }
+
+type AfkInfo struct {
+	Until   time.Time
+	Message string
+}
+
+var AFK_USERS = map[string]AfkInfo{}
 
 var TOGGLES = map[string]bool{
 	"chatter":     false,
@@ -2268,12 +2276,7 @@ func cmdSiginfo(r Recipient, chName string, args []string) (result string) {
 	result += fmt.Sprintf("# of COUNTERS              : %d\n", len(COUNTERS))
 	for c, m := range COUNTERS {
 		s := fmt.Sprintf("# of '%s'", c)
-		padding := len("Seconds since last message ") - len(s)
-		n := 0
-		for n < padding {
-			s += " "
-			n++
-		}
+		s = rightpad(s, " ", len("Seconds since last message "))
 		result += fmt.Sprintf("%s: %d\n", s, len(m))
 	}
 
@@ -3318,6 +3321,10 @@ func cmdWtf(r Recipient, chName string, args []string) (result string) {
 
 	if strings.HasPrefix(result, "ywtf: ") {
 		result = result[6:]
+	}
+
+	if len(result) < 1 {
+		result = fmt.Sprintf("I'm afraid I don't know what %s means.", term)
 	}
 
 	return
@@ -5229,20 +5236,38 @@ func randomLineFromUrl(theUrl string) (line string) {
 }
 
 func readSavedData() {
-	verbose(2, "Reading saved data from: %s", CONFIG["channelsFile"])
-	if _, err := os.Stat(CONFIG["channelsFile"]); err != nil {
+	verbose(2, "Reading saved AFK data from: %s", CONFIG["afkFile"])
+	if _, err := os.Stat(CONFIG["afkFile"]); err != nil {
 		return
 	}
 
-	b, err := ioutil.ReadFile(CONFIG["channelsFile"])
+	b, err := ioutil.ReadFile(CONFIG["afkFile"])
 	if err != nil {
-		fail("Error %s: %q\n", CONFIG["channelsFile"], err)
+		fail("Error %s: %q\n", CONFIG["afkFile"], err)
 	}
 
 	buf := bytes.Buffer{}
 	buf.Write(b)
 
 	d := gob.NewDecoder(&buf)
+	if err := d.Decode(&AFK_USERS); err != nil {
+		fail("Unable to decode data: %s\n", err)
+	}
+
+	verbose(2, "Reading saved data from: %s", CONFIG["channelsFile"])
+	if _, err := os.Stat(CONFIG["channelsFile"]); err != nil {
+		return
+	}
+
+	b, err = ioutil.ReadFile(CONFIG["channelsFile"])
+	if err != nil {
+		fail("Error %s: %q\n", CONFIG["channelsFile"], err)
+	}
+
+	buf = bytes.Buffer{}
+	buf.Write(b)
+
+	d = gob.NewDecoder(&buf)
 	if err := d.Decode(&CHANNELS); err != nil {
 		fail("Unable to decode data: %s\n", err)
 	}
@@ -5351,6 +5376,17 @@ func reply(r Recipient, msg string) {
 	}
 }
 
+func rightpad(input, char string, length int) (padded string) {
+	padded = input
+	diff := length - len(input)
+	n := 0
+	for n < diff {
+		padded += char
+		n++
+	}
+	return
+}
+
 func runCommand(cmd ...string) (out []byte, rval int) {
 	var argv []string
 
@@ -5427,6 +5463,21 @@ func serializeData() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to write data to '%s': %s\n",
 			CONFIG["countersFile"], err)
+		return
+	}
+
+	gob.Register(map[string]AfkInfo{})
+	b = bytes.Buffer{}
+	e = gob.NewEncoder(&b)
+	if err := e.Encode(AFK_USERS); err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to encode AFK users: %s\n", err)
+		return
+	}
+
+	err = ioutil.WriteFile(CONFIG["afkFile"], b.Bytes(), 0600)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to write data to '%s': %s\n",
+			CONFIG["afkFile"], err)
 		return
 	}
 

@@ -913,6 +913,8 @@ func processChatter(r Recipient, msg string, forUs bool) {
 		return
 	}
 
+	processAfks(r, msg)
+
 	insult_re := regexp.MustCompile(fmt.Sprintf("(?i)^(%s[,:]? *)(please )?insult ", yo))
 	if insult_re.MatchString(msg) {
 		target := strings.SplitN(msg, "insult ", 2)
