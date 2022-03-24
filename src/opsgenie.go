@@ -18,12 +18,19 @@ const SLEEP_TIME = 5
 
 func init() {
 	URLS["opsgenie"] = "https://api.opsgenie.com/v2/"
-	URLS["directory"] = "https://XXXdirectoryURLXXX"
+	URLS["directory"] = CONFIG["directoryUrl"]
 
 	COMMANDS["oncall"] = &Command{cmdOncall,
 		"show who's oncall",
 		"Service Now & OpsGenie",
-		"!oncall [<group>]\nIf <group> is not specified, this uses the channel name.\nUse '!set oncall=<rotation-name>' to change the default.\nIf your <rotation name> contains spaces, you have to quote the argument ('!set oncall=\"<rotation name>\"').\nYou can also specify multiple rotations by separating them with a comma (','); this works for both explicit invocations as well as for channel settings.\n\nIf you invoke the command and follow it with multiple arguments ('!oncall please look at ticket 12345'), then I will @-mention the current oncall for the rotation set in the channel and point them to your message.\n\nIf your channel does not have an oncall rotation and you want to have me reply to users with some other message, use '!set noncall=\"your message here\", and I will give people \"your message here\" when they run '!oncall'.\n\n",
+		"!oncall [-n] [<group>]\n" +
+			"Fetch the current oncall contact; if '-n' is given, fetch the next oncall contact.\n" +
+			"If <group> is not specified, this uses the channel name.\n" +
+			"Use '!set oncall=<rotation-name>' to change the default.\n" +
+			"If your <rotation name> contains spaces, you have to quote the argument ('!set oncall=\"<rotation name>\"').\n" +
+			"You can also specify multiple rotations by separating them with a comma (','); this works for both explicit invocations as well as for channel settings.\n\n" +
+			"If you invoke the command and follow it with multiple arguments ('!oncall please look at ticket 12345'), then I will @-mention the current oncall for the rotation set in the channel and point them to your message.\n\n" +
+			"If your channel does not have an oncall rotation and you want to have me reply to users with some other message, use '!set noncall=\"your message here\"', and I will give people \"your message here\" when they run '!oncall'.\n\n",
 		[]string{"on_call", "on-call"}}
 }
 
@@ -43,8 +50,17 @@ type OpsGenieApiData struct {
 func cmdOncall(r Recipient, chName string, args []string) (result string) {
 	input := strings.Join(args, " ")
 
+	next := false
 	var oncall string
 	var noncall string
+
+	if len(args) > 0 {
+		if args[0] == "-n" {
+			next = true
+			args = args[1:]
+		}
+	}
+
 	if len(args) == 1 {
 		oncall = args[0]
 	}
@@ -58,12 +74,8 @@ func cmdOncall(r Recipient, chName string, args []string) (result string) {
 	}
 
 	if len(oncall) < 1 {
-		if ch, found := getChannel(r.ChatType, r.ReplyTo); found {
-			if r.ChatType == "hipchat" {
-				oncall = r.ReplyTo
-			} else {
-				oncall = ch.Name
-			}
+		if ch, found := getChannel(r); found {
+			oncall = ch.Name
 			oncall_source = "channel name"
 			if v, found := ch.Settings["oncall"]; found {
 				oncall = v
@@ -82,7 +94,10 @@ func cmdOncall(r Recipient, chName string, args []string) (result string) {
 		if n > 0 {
 			result += "\n---\n"
 		}
-		result += cmdOncallOpsGenie(r, chName, rot, true)
+
+		rot = strings.TrimSpace(rot)
+
+		result += cmdOncallOpsGenie(r, chName, rot, true, next)
 		if len(result) < 1 {
 			result = fmt.Sprintf("No oncall information found for '%s'.\n", oncall)
 			oncallFound = false
@@ -106,7 +121,7 @@ func cmdOncall(r Recipient, chName string, args []string) (result string) {
 		}
 
 		if atMention {
-			user_re := regexp.MustCompile(fmt.Sprintf("(?i)%s/([^|]+)", URLS["directory"])
+			user_re := regexp.MustCompile(fmt.Sprintf("(?i)%s([^|]+)", URLS["directory"]))
 			if m := user_re.FindAllStringSubmatch(result, -1); len(m) > 0 {
 				users := map[string]bool{}
 				for _, u := range m {
@@ -127,6 +142,7 @@ func cmdOncall(r Recipient, chName string, args []string) (result string) {
 						result += k + " "
 					}
 					result += " --^"
+					fmt.Fprintf(os.Stderr, "DEBUG: oncall @-mention thread reply: %v\n", r)
 				}
 			}
 		}
@@ -135,7 +151,7 @@ func cmdOncall(r Recipient, chName string, args []string) (result string) {
 	return
 }
 
-func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (result string) {
+func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool, next bool) (result string) {
 	var candidates []string
 	scheduleFound := false
 	wantedName := args
@@ -156,6 +172,13 @@ func cmdOncallOpsGenie(r Recipient, chName, args string, allowRecursion bool) (r
 LabelLookup:
 	sinfo := opsGenieIds(schedules, wantedName)
 
+	endpoint := "on-calls"
+	resultField := "onCallParticipants"
+	if next {
+		endpoint = "next-on-calls"
+		resultField = "nextOnCallRecipients"
+	}
+
 	for _, sched := range sinfo {
 		sid := sched.ScheduleId
 		tid := sched.TeamId
@@ -167,14 +190,14 @@ LabelLookup:
 			continue
 		}
 
-		theUrl = URLS["opsgenie"] + "schedules/" + sid + "/on-calls"
+		theUrl = URLS["opsgenie"] + "schedules/" + sid + "/" + endpoint
 		ogOncalls := getOpsgenieAPIData(theUrl)
 		if len(ogOncalls.Message) > 0 {
 			result = schedules.Message
 			return
 		}
 
-		participants := ogOncalls.Data.(map[string]interface{})["onCallParticipants"].([]interface{})
+		participants := ogOncalls.Data.(map[string]interface{})[resultField].([]interface{})
 		if len(participants) > 0 {
 			scheduleFound = true
 			if tname != sname {
@@ -226,7 +249,7 @@ LabelLookup:
 	if !scheduleFound && len(candidates) > 0 {
 		if len(candidates) == 1 && strings.EqualFold(wantedName, candidates[0]) &&
 			allowRecursion {
-			return cmdOncallOpsGenie(r, chName, candidates[0], false)
+			return cmdOncallOpsGenie(r, chName, candidates[0], false, next)
 		}
 		result += fmt.Sprintf("No OpsGenie schedule found for rotation '%s'.\n", wantedName)
 		result += "\nPossible candidates:\n"
@@ -331,7 +354,7 @@ func opsgenieUserDetails(u string) (details string) {
 		return
 	}
 
-	details = fmt.Sprintf("<%s/%s|%s> (%s", URLS["directory"], u[:i], ogu.Data.(map[string]interface{})["fullName"].(string), u)
+	details = fmt.Sprintf("<%s%s|%s> (%s", URLS["directory"], u[:i], ogu.Data.(map[string]interface{})["fullName"].(string), u)
 	for _, c := range ogu.Data.(map[string]interface{})["userContacts"].([]interface{}) {
 		if c.(map[string]interface{})["contactMethod"].(string) == "voice" {
 			details += fmt.Sprintf(", %s", c.(map[string]interface{})["to"].(string))

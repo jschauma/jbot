@@ -4,6 +4,7 @@
  * Settings for the auto-replies are:
  * !set athere|atchannel topic
  * !set athere|atchannel shame
+ * !set athere|atchannel insult
  *
  *
  * For consistency's sake, this file also contains the
@@ -53,7 +54,8 @@ func athere(msg string, ch *Channel, r Recipient) (result string) {
 		}
 	}
 
-	/*
+	/* I forgot why this is commented out -
+	 * ListPins doesn't work?
 		if ((strings.EqualFold(atchannelSetting, "pinned") && atChannel) ||
 			(strings.EqualFold(athereSetting, "pinned") && atHere)) {
 			pinnedItems, _, err := SLACK_CLIENT.ListPins(ch.Id)
@@ -80,6 +82,7 @@ func athere(msg string, ch *Channel, r Recipient) (result string) {
 		}
 		result += fmt.Sprintf("You just alerted %d users.\n", num)
 		result += fmt.Sprintf("Please carefully consider if that is really necessary before you use `@%s` the next time.\n", trigger)
+		result += "See also: https://www.nohere.info/\n"
 	}
 
 	if (strings.EqualFold(atchannelSetting, "insult") && atChannel) ||

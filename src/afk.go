@@ -38,6 +38,9 @@ func cmdAfk(r Recipient, chName string, args []string) (result string) {
 		result = "Sorry, this functionality is restricted to true workspace users."
 		return
 	}
+	if reject, ok := channelCheck(r, chName, true, false); !ok {
+		return reject
+	}
 
 	if len(args) < 1 {
 		var afks []string

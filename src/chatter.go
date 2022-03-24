@@ -134,6 +134,14 @@ func init() {
 	URLS["schneier"] = "http://localhost/schneier"
 	URLS["shakespeare"] = "http://localhost/shakespeare"
 	URLS["swquotes"] = "http://localhost/swquotes"
+
+	COMMANDS["chatter"] = &Command{cmdChatter,
+		"report, enable, or disable 'chatter'",
+		"builtin",
+		"!chatter [on|off]\n" +
+			"This is really only a shortcut for '!toggle chatter',\n" +
+			"but since people forget how that works, I'm letting you off easy.",
+		nil}
 }
 
 func chatterEliza(msg string, r Recipient) (result string) {
@@ -880,21 +888,51 @@ func chatterSeinfeld(msg string) (result string) {
 	return
 }
 
-func processChatter(r Recipient, msg string, forUs bool) {
-	var chitchat string
+func cmdChatter(r Recipient, chName string, args []string) (result string) {
+	if len(args) > 1 {
+		result = "Usage: " + COMMANDS["chatter"].Usage
+		return
+	}
 
-	yo := "(@?" + CONFIG["mentionName"] + ")"
-	/* We can't use "\b", because that doesn't
-	 * match e.g., "<@1234>" because "<" or "@"
-	 * are not non-word boundary chars. */
-	mentioned_re := regexp.MustCompile(`(?i)[^a-z0-9_/-]` + yo + `[^a-z0-9_/-]`)
-	forUs_re := regexp.MustCompile(`(?i)([^a-z0-9_/-]<@` + CONFIG["slackID"] + `[^a-z0-9_/-])|(^` + CONFIG["mentionName"] + `|` + CONFIG["mentionName"] + `$)`)
+	ch, found := CHANNELS[chName]
+	if !found {
+		result = "'chatter' only makes sense in a channel."
+		return
+	}
 
+	chatter, found := ch.Toggles["chatter"]
+	if !found {
+		result = "Wait, what? How is 'chatter' not even a toggle?"
+		result += "Please tell my boss in #yaybot.  Thanks!"
+		return
+	}
+
+	if len(args) < 1 {
+		result = fmt.Sprintf("'chatter' is currently set to %v", chatter)
+		return
+	}
+
+	onoff, err := truthy(args[0])
+	if err != nil {
+		result = fmt.Sprintf("Invalid value '%s'. Try 'on' or 'off'.", args[0])
+		return
+	}
+
+	if (chatter && onoff) || (!chatter && !onoff) {
+		result = fmt.Sprintf("'chatter' is already '%s' for '%s'.", args[0], chName)
+		return
+	}
+
+	result = cmdToggle(r, chName, []string{"chatter"})
+	return
+}
+
+func processChatter(r Recipient, msg string) {
 	/* If we received a message but can't find the
 	 * channel, then it must have been a priv
 	 * message.  Priv messages only get
 	 * commands, not chatter. */
-	ch, found := getChannel(r.ChatType, r.ReplyTo)
+	ch, found := getChannel(r)
 	if !found {
 		/* Per https://is.gd/HXUix5, a privmsg
 		 * begins with a 'D'. */
@@ -902,12 +940,9 @@ func processChatter(r Recipient, msg string, forUs bool) {
 			processCommands(r, "!", msg)
 		}
 		return
-	} else if !forUs {
-		forUs = forUs_re.MatchString(msg)
 	}
 
-	jbotDebug(fmt.Sprintf("%v in %s: %s - %v", r, ch.Name, msg, forUs))
-	leave_re := regexp.MustCompile(fmt.Sprintf("(?i)^((%s[,:]? *)(please )?leave)|(please )?leave[,:]? %s", yo, yo))
+	leave_re := regexp.MustCompile(fmt.Sprintf("(?i)^((%s[,:]? *)(please )?leave)|(please )?leave[,:]? %s", CONFIG["mentionName"], CONFIG["mentionName"]))
 	if leave_re.MatchString(msg) {
 		leave(r, found, msg, false)
 		return
@@ -915,43 +950,35 @@ func processChatter(r Recipient, msg string, forUs bool) {
 
 	processAfks(r, msg)
 
-	insult_re := regexp.MustCompile(fmt.Sprintf("(?i)^(%s[,:]? *)(please )?insult ", yo))
+	insult_re := regexp.MustCompile(fmt.Sprintf("(?i)^(%s[,:]? *)(please )?insult ", CONFIG["mentionName"]))
 	if insult_re.MatchString(msg) {
 		target := strings.SplitN(msg, "insult ", 2)
 		reply(r, cmdInsult(r, r.ReplyTo, []string{target[1]}))
 		return
 	}
 
-	/* 'forUs' tells us if a message was
-	 * specifically directed at us via ! or @jbot;
-	 * these do not require a 'chatter' toggle to
-	 * be enabled.  If a message contains our
-	 * name, then we may respond only if 'chatter'
-	 * is not toggled off. */
-	mentioned := mentioned_re.MatchString(msg)
-	if mentioned && isThrottled("mentioned", ch) {
-		mentioned = false
-	}
-
-	jbotDebug(fmt.Sprintf("forUs: %v; chatter: %v; mentioned: %v\n", forUs, ch.Toggles["chatter"], mentioned))
-
 	help_re := regexp.MustCompile(fmt.Sprintf("(?i)@?%s,? (!?help( all)?)$", CONFIG["mentionName"]))
 	m := help_re.FindStringSubmatch(msg)
 	if len(m) > 0 {
-		arg := ""
+		var args []string
 		if len(m[2]) > 0 {
-			arg = "all"
+			args = []string{"all"}
 		}
-		reply(r, cmdHelp(r, r.ReplyTo, []string{arg}))
+		reply(r, cmdHelp(r, r.ReplyTo, args))
 		return
 	}
 
-	if wasInsult(msg) && (forUs ||
-		(ch.Toggles["chatter"] && mentioned)) {
+	/* If we were specifically at-mentioned, then
+	 * we can reply even if 'chatter' is toggled off... */
+	mentioned, atMentioned := didTheyMentionMe(r, ch, msg)
+	mayReply := atMentioned || (ch.Toggles["chatter"] && mentioned)
+
+	if wasInsult(msg) && mayReply {
 		reply(r, cmdInsult(r, r.ReplyTo, []string{"me"}))
 		return
 	}
 
+	var chitchat string
 	if ch.Toggles["chatter"] {
 		chitchat = chatterParrotParty(msg)
 		if len(chitchat) > 0 {
@@ -1003,13 +1030,44 @@ func processChatter(r Recipient, msg string, forUs bool) {
 		}
 	}
 
-	if forUs || (ch.Toggles["chatter"] && mentioned) {
+	if mayReply {
 		chitchat = chatterEliza(msg, r)
 		if len(chitchat) > 0 {
 			reply(r, chitchat)
 		}
 		return
 	}
+}
+
+func didTheyMentionMe(r Recipient, ch *Channel, msg string) (mentioned, atMentioned bool) {
+	/* If a message contains the bot's name at a
+	 * word boundary, then we have been
+	 * "mentioned".  If a message contains a
+	 * proper Slack @-mention (i.e., "<@1234>"),
+	 * then we have been "atMentioned". */
+	mentioned_re := regexp.MustCompile(`(?i)\b` + CONFIG["mentionName"] + `\b`)
+	mentioned = mentioned_re.MatchString(msg)
+
+	atMentioned_re := regexp.MustCompile(`(?i)<@` + CONFIG["slackID"] + `>`)
+	atMentioned = atMentioned_re.MatchString(msg)
+
+	/* But if we were mentioned and it was not at
+	 * the beginning or the end of the line, then
+	 * we throttle ourselves for 30 seconds so
+	 * people can talk about the bot without it
+	 * triggering replies to every single sentence. */
+	if mentioned && !strings.HasPrefix(msg, CONFIG["mentionName"]) &&
+		!strings.HasSuffix(msg, CONFIG["mentionName"]) {
+		if isThrottled("mentioned", ch) {
+			mentioned = false
+		}
+		/* isThrottled sets the default 1800
+		* second throttle, so we
+		* immediately set it to 30
+		* seconds here */
+		cmdThrottle(r, ch.Name, []string{"mentioned", "30"})
+	}
+	return
 }
 
 func wasInsult(msg string) (result bool) {

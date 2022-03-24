@@ -97,7 +97,7 @@ type NvdFeed struct {
 }
 
 func init() {
-	URLS["cvefeed"] = "https://nvd.nist.gov/feeds/json/cve/1.0/nvdcve-1.0-recent.json.gz"
+	URLS["cvefeed"] = "https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-recent.json.gz"
 	COMMANDS["cve"] = &Command{cmdCve,
 		"display vulnerability description",
 		"https://v1.cveapi.com/",
@@ -155,7 +155,7 @@ func cveAlert(chInfo Channel) {
 		return
 	}
 
-	r := getRecipientFromMessage(fmt.Sprintf("%s@%s", CONFIG["mentionName"], chInfo.Id), "slack")
+	r := getRecipientFromMessage(fmt.Sprintf("%s@%s", CONFIG["mentionName"], chInfo.Id))
 	v, err := strconv.ParseBool(cve_alert)
 
 	verbose(3, "Running cve-alert in '%s' (%v)...", chInfo.Name, v)

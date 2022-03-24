@@ -22,7 +22,7 @@ func init() {
 	COMMANDS["cmrs"] = &Command{cmdCmrs,
 		"display upcoming CMRs",
 		"service-now",
-		"!cmrs [time[dh]|all|ongoing] [property]",
+		"!cmrs [time[dh]|all|blocking|impacting|waiting|ongoing] [property] [state]",
 		[]string{"chgs"}}
 	COMMANDS["sn"] = &Command{cmdSnow,
 		"show Service Now data for the given ticket",
@@ -32,24 +32,43 @@ func init() {
 }
 
 func cmdCmrs(r Recipient, chName string, args []string) (result string) {
-	if len(args) > 2 {
+	if reject, ok := channelCheck(r, chName, true, false); !ok {
+		return reject
+	}
+
+	if len(args) > 3 {
 		result = "Usage: " + COMMANDS["cmrs"].Usage
 		return
 	}
 
 	cmd := []string{"-c"}
 
+	which := ""
+
 	if len(args) > 0 {
-		counterRe := regexp.MustCompile(`(([0-9]+)([hd])?|all|ongoing)`)
+		counterRe := regexp.MustCompile(`(([0-9]+)([hd])?|all|blocking|impacting|waiting|ongoing)`)
 		m := counterRe.FindStringSubmatch(args[0])
 		if len(m) < 1 {
-			result = fmt.Sprintf("Invalid argument '%s' forr time.\n", args[0])
+			result = fmt.Sprintf("Invalid argument '%s' for time.\n", args[0])
 			result += "Usage: " + COMMANDS["cmrs"].Usage
 			return
 		}
-		if m[1] != "all" {
-			if m[1] == "ongoing" {
+		which = m[1]
+		if which != "all" {
+			if which == "ongoing" {
 				cmd = append(cmd, "-o")
+			} else if which == "waiting" {
+				cmd = append(cmd, "-w")
+			} else if which == "blocking" {
+				cmd = append(cmd, "-b", "'"+args[1]+"'")
+				args = args[1:]
+			} else if which == "impacting" {
+				cmd = append(cmd, "-i", args[1])
+				args = args[1:]
+				if len(args) > 1 {
+					cmd = append(cmd, "-q", "'"+args[1]+"'")
+					args = args[1:]
+				}
 			} else {
 				targ := args[0]
 				n, _ := strconv.Atoi(m[2])
@@ -69,12 +88,16 @@ func cmdCmrs(r Recipient, chName string, args []string) (result string) {
 
 	result = cmdSnow(r, chName, cmd)
 	if len(result) < 1 {
-		result = "No upcoming CMRs found."
+		result = "No " + which + " CMRs found."
 	}
 	return
 }
 
 func cmdSnow(r Recipient, chName string, args []string) (result string) {
+	if reject, ok := channelCheck(r, chName, true, false); !ok {
+		return reject
+	}
+
 	input := strings.Join(args, " ")
 	verbose(2, "Running 'snow' with '%s'...", input)
 	// unmatch <#something|channel>
@@ -93,43 +116,54 @@ func cmdSnow(r Recipient, chName string, args []string) (result string) {
 
 	/* Sometimes people run '!inc INC123467.'.
 	 * Let's be nice and let them. */
-	input = strings.TrimRight(input, "!\"#$%&'()*+,-./:;<=>?@[]^_`{|}~\\")
+	input = strings.TrimRight(input, "!\"'#$%&()*+,-./:;<=>?@[]^_`{|}~\\")
+
+	/* Folks also seem to (via copy and paste?)
+	 * use *bold* INC numbers without noticing.
+	 * I.e., '!inc *INC1234567*' - so let's trim
+	 * left, too. Keep '-', though, for options
+	 * below. */
+	input = strings.TrimLeft(input, "!\"'#$%&()*+,./:;<=>?@[]^_`{|}~\\")
 
 	/* 'snow' needs e.g. INC12345 to be upper
 	 * case, but we want to be able to pass
 	 * options; if we have options, assume the
 	 * user knows what they're doing and don't
-	 * uppercase. */
+	 * uppercase.  Instead, we build a list of
+	 * valid, uppercased tickets with any invalid
+	 * characters stripped: */
+	tickets := []string{}
 	if !strings.HasPrefix(input, "-") {
 		input = strings.ToUpper(input)
+		/* In addition, we trim all strings that don't
+		 * look like snow tickets. */
+		badchars := regexp.MustCompile(`[^A-Z0-9]+`)
+		snow_re := regexp.MustCompile(`^[A-Z]+[0-9]+$`)
+		for _, f := range strings.Fields(input) {
+			stripped := badchars.ReplaceAllString(f, "")
+			if snow_re.MatchString(stripped) {
+				tickets = append(tickets, stripped)
+			}
+		}
+	} else {
+		tickets = []string{input}
 	}
 
 	var lines string
-	for {
-		cmd := strings.TrimSpace(fmt.Sprintf("snow -u %s %s", CONFIG["mentionName"], input))
+	for _, t := range tickets {
+		cmd := strings.TrimSpace(fmt.Sprintf("snow -u %s %s", CONFIG["mentionName"], t))
 		out, _ := runCommand(cmd)
-		lines = string(out)
-
-		if !strings.HasPrefix(lines, "Usage:") {
-			break
-		}
-
-		list := strings.Split(input, " ")
-		input = list[0]
-		if len(list) < 2 {
-			break
-		}
+		lines += string(out)
 	}
 
 	l := strings.Split(lines, "\n")
 	cmrSearch := listContains(args, "-c")
-	ongoing := listContains(args, "-o")
 	if len(l) > 15 && (len(args) < 2 || cmrSearch) {
 		result = strings.Join(l[0:15], "\n")
 		result += "\n[...]\n"
 		if cmrSearch {
 			which := "upcoming"
-			if ongoing {
+			if listContains(args, "-o") {
 				which = "ongoing"
 			}
 			result += fmt.Sprintf("<%s|All %s CMRs>", l[len(l)-2], which)
@@ -158,8 +192,9 @@ func snowAlert(chInfo Channel, alert string) {
 	}
 
 	verbose(4, "Running %s in '%s'...", alert, chInfo.Name)
-	r := getRecipientFromMessage(fmt.Sprintf("%s@%s", CONFIG["mentionName"], chInfo.Id), "slack")
-	setval := strings.SplitN(alertSettings, ",", 3)
+	r := getRecipientFromMessage(fmt.Sprintf("%s@%s", CONFIG["mentionName"], chInfo.Id))
+	/* Example: cmr-alert=30,Native_Ads.GLB,impacting,approved */
+	setval := strings.SplitN(alertSettings, ",", 4)
 	// alert=''; i.e. unset
 	if len(setval[0]) < 1 {
 		return
@@ -176,7 +211,7 @@ func snowAlert(chInfo Channel, alert string) {
 	alert_num, err := strconv.Atoi(num)
 	if err != nil {
 		msg := fmt.Sprintf("'%s' setting '%s' invalid.\n", alert, num)
-		msg += fmt.Sprintf("Please change via '!set %s=<num[,[property|all][,[all|ongoing]]>'.", alert)
+		msg += fmt.Sprintf("Please change via '!set %s=<num[,[property|all][,[all|blocking|impacting|ongoing|waiting]]>'.", alert)
 		reply(r, msg)
 		return
 	}
@@ -201,11 +236,23 @@ func snowAlert(chInfo Channel, alert string) {
 	ongoing := false
 	/* if counter_num == 0, then we never ran */
 	if counter_num == 0 || counter_num >= alert_num {
+		needArg := false
 		args := []string{ALERTS[alert]}
 		if len(setval) > 2 {
 			if setval[2] == "ongoing" {
 				ongoing = true
 				args = append(args, "-o")
+			} else if setval[2] == "waiting" {
+				args = append(args, "-w")
+			} else if setval[2] == "impacting" {
+				args = append(args, "-i", setval[1])
+				needArg = true
+				if len(setval) > 3 {
+					args = append(args, "-q", setval[3])
+				}
+			} else if setval[2] == "blocking" {
+				args = append(args, "-b", setval[1])
+				needArg = true
 			}
 		}
 
@@ -216,7 +263,7 @@ func snowAlert(chInfo Channel, alert string) {
 			args = append(args, fmt.Sprintf("%d", alert_num*PERIODICS))
 		}
 
-		if len(setval) > 1 && setval[1] != "all" {
+		if len(setval) > 1 && setval[1] != "all" && !needArg {
 			args = append(args, "-p", setval[1])
 		}
 

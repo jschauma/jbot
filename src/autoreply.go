@@ -113,7 +113,7 @@ func cmdAutoreply(r Recipient, chName string, args []string) (result string) {
 func processAutoReplies(r Recipient, msg string) (replied bool) {
 	replied = false
 
-	ch, found := getChannel(r.ChatType, r.ReplyTo)
+	ch, found := getChannel(r)
 	if !found {
 		/* ignore anything not in a channel */
 		return
@@ -128,9 +128,9 @@ func processAutoReplies(r Recipient, msg string) (replied bool) {
 		}
 
 		if pattern.MatchString(msg) {
-			replied = true
 			if !isThrottled("autoreply: "+p, ch) {
 				reply(r, response.ReplyString)
+				replied = true
 				cmdThrottle(r, ch.Name, []string{"autoreply: " + p, fmt.Sprintf("%d", response.ReplyThrottle*60)})
 			}
 		}

@@ -1,4 +1,4 @@
-This is a HipChat / Slack version of the 'jbot' IRC bot,
+This is a Slack version of the 'jbot' IRC bot,
 originally "developed" at Yahoo! in 2007, and which
 can be found in the 'old/irc' subdir.
 
@@ -12,18 +12,6 @@ You should be able to run the bot by populating a
 configuration file with suitable values.  The
 following configuration values are required:
 
-For HipChat:
-```
-hcPassword    = the HipChat password of the bot user
-     OR
-hcOauthToken  = the HipChat Oauth token for the bot user
-hcService     = the HipChat company prefix, e.g. <foo>.hipchat.com
-hcJabberID    = the HipChat / JabberID of the bot user
-fullName      = how the bot presents itself
-mentionName   = to which name the bot responds to
-```
-
-For Slack:
 ```
 slackService  = the Slack service name, e.g. <foo>.slack.com
 slackToken    = the authentication token for your bot

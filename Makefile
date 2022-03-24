@@ -19,7 +19,8 @@ SOURCES= \
         src/jira.go             \
         src/opsgenie.go         \
         src/secheaders.go       \
-        src/ssllabs.go
+        src/ssllabs.go		\
+        src/stats.go
 
 
 
