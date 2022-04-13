@@ -41,14 +41,13 @@ type JiraSearchResult struct {
 
 func init() {
 	ALERTS["jira-alert"] = "true"
-	URLS["jira"] = CONFIG["jiraUrl"]
 
-	COMMANDS["jira"] = &Command{cmdJira,
-		"display info about a jira ticket",
-		URLS["jira"] + JIRA_REST,
-		"To display information about a ticket: `!jira <ticket>`\n" +
-			"To set an alert for new tickets: `!alerts jira-alert`\n",
-		nil}
+	/* COMMANDS initialization is in
+	 * src/jbot.go#createCommands(),
+	 * because it uses a URL that comes from the
+	 * config file, so cannot be created in
+	 * 'init()', which runs before the config file
+	 * is parsed. */
 }
 
 func cmdJira(r Recipient, chName string, args []string) (result string) {

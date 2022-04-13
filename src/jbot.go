@@ -230,7 +230,6 @@ type Channel struct {
 	Dislikes    map[string]map[string]int
 	Id          string
 	Inviter     string
-	Id          string
 	IsExtShared bool
 	Likes       map[string]map[string]int
 	MsgStats    []MsgStat
@@ -238,6 +237,7 @@ type Channel struct {
 	Phishy      *PhishCount
 	Settings    map[string]string
 	SlackUsers  map[string]UserInfo
+	Throttles   map[string]time.Time
 	Toggles     map[string]bool
 }
 
@@ -294,12 +294,11 @@ func addressedToTheBot(in string) bool {
 }
 
 func cmdAlerts(r Recipient, chName string, args []string) (result string) {
-	chInfo, found := CHANNELS[chName]
-	if !found {
-		fmt.Fprintf(os.Stderr, ":: alerts: channel %s not found!\n", chName)
-		result = "This command only works in a channel."
-		return
+	if reject, ok := channelCheck(r, chName, false, false); !ok {
+		return reject
 	}
+
+	chInfo := CHANNELS[chName]
 
 	if len(args) < 1 {
 		result = "Alerts can be used to get periodic notifications about certain events.\n"
@@ -1355,7 +1354,7 @@ func cmdHelp(r Recipient, chName string, args []string) (result string) {
 			o = "here"
 		}
 		result = fmt.Sprintf("Channel setting to react to `@%s` invocations.\n"+
-			"Usage: !set at%s [topic|shame|insult]\n"+
+			"Usage: !set at%s=[topic|shame|insult]\n"+
 			"topic -- reply with the channel topic\n"+
 			"shame -- inform the user how many people they alerted\n"+
 			"insult -- insult the user\n\n"+
@@ -3484,6 +3483,12 @@ func createCommands() {
 		"http://www.pangloss.com/seidel/Shaker/index.html",
 		"!insult <somebody>",
 		nil}
+	COMMANDS["jira"] = &Command{cmdJira,
+		"display info about a jira ticket",
+		URLS["jira"] + JIRA_REST,
+		"To display information about a ticket: `!jira <ticket>`\n" +
+			"To set an alert for new tickets: `!alerts jira-alert`\n",
+		nil}
 	COMMANDS["latlong"] = &Command{cmdLatLong,
 		"look up latitude and longitude for a given location",
 		"https://www.latlong.net/",
@@ -3562,6 +3567,11 @@ func createCommands() {
 		"HipChat / Slack API",
 		"!room <name> [list-users]",
 		[]string{"channel"}}
+	COMMANDS["sbugs"] = &Command{cmdSbugs,
+		"show sbugs for the given user",
+		URLS["jira"] + "/rest/api/latest/search?jql=",
+		"!sbugs [<user>] [list [all]]",
+		nil}
 	COMMANDS["seen"] = &Command{cmdSeen,
 		"show last time <user> was seen in <channel>",
 		"builtin",
@@ -3917,6 +3927,7 @@ func getAllMembersInChannel(id string) (allMembers []string) {
 		}
 	}
 
+	verbose(2, "Got %d members.", len(allMembers))
 	return
 }
 
@@ -4214,7 +4225,6 @@ func getSortedKeys(hash map[string]int, rev bool) (sorted []string) {
  * - if args["basic-auth-user"] is set, use that username for basic HTTP auth
  * - if args["basic-auth-password"] is set, use that password for basic HTTP auth
  * - if any args["header"] is set, use that value to set the given header
- *   set the given 'key=value' headers
  */
 func getURLContents(givenURL string, args map[string]string) (data []byte) {
 	verbose(3, "Fetching %s...", givenURL)
@@ -4698,6 +4708,9 @@ func parseConfig() {
 			fh.Close()
 		}
 	}
+
+	URLS["jira"] = CONFIG["jiraUrl"]
+	URLS["directory"] = CONFIG["directoryUrl"]
 }
 
 func printCommandHelp(cmd string, c *Command) (help string) {
@@ -5476,8 +5489,6 @@ func updateSlackChannels() {
 			break
 		}
 	}
-
-	CURRENTLY_UPDATING_CHANNELS = false
 	verbose(3, "Fetched %d channels.", len(SLACK_CHANNELS))
 
 	verbose(2, "Updating shared status for all my channels...")

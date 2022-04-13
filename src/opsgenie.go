@@ -18,7 +18,6 @@ const SLEEP_TIME = 5
 
 func init() {
 	URLS["opsgenie"] = "https://api.opsgenie.com/v2/"
-	URLS["directory"] = CONFIG["directoryUrl"]
 
 	COMMANDS["oncall"] = &Command{cmdOncall,
 		"show who's oncall",
@@ -353,7 +352,6 @@ func opsgenieUserDetails(u string) (details string) {
 	if ogu.Data == nil {
 		return
 	}
-
 	details = fmt.Sprintf("<%s%s|%s> (%s", URLS["directory"], u[:i], ogu.Data.(map[string]interface{})["fullName"].(string), u)
 	for _, c := range ogu.Data.(map[string]interface{})["userContacts"].([]interface{}) {
 		if c.(map[string]interface{})["contactMethod"].(string) == "voice" {
