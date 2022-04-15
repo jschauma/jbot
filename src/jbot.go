@@ -401,7 +401,7 @@ func channelCheck(r Recipient, chName string, allowPriv, allowExtShared bool) (m
 			message = "This command only works in a channel."
 			return
 		}
-		if !allowExtShared && !isWorkspaceUser(r.MentionName) {
+		if !allowExtShared && !isWorkspaceUser(r.MentionName, r.Id) {
 			message = "Sorry, this functionality is restricted to true workspace users."
 			return
 		}
@@ -4494,7 +4494,7 @@ func incrementCounter(category, counter string) {
 	}
 }
 
-func isWorkspaceUser(uname string) (yesno bool) {
+func isWorkspaceUser(uname, id string) (yesno bool) {
 	/* We allow ourselves to make all calls. */
 	if uname == CONFIG["mentionName"] {
 		return true
@@ -4502,7 +4502,10 @@ func isWorkspaceUser(uname string) (yesno bool) {
 
 	u := getSlackUser(uname)
 	if u == nil {
-		return false
+		u = getSlackUser(id)
+		if u == nil {
+			return false
+		}
 	}
 
 	return !u.IsRestricted && !u.IsUltraRestricted && !u.IsStranger && !u.IsBot

@@ -34,7 +34,7 @@ func init() {
 }
 
 func cmdAfk(r Recipient, chName string, args []string) (result string) {
-	if !isWorkspaceUser(r.MentionName) {
+	if !isWorkspaceUser(r.MentionName, r.Id) {
 		result = "Sorry, this functionality is restricted to true workspace users."
 		return
 	}
