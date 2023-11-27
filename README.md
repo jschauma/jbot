@@ -490,18 +490,6 @@ been triggered within a given time frame. You can
 check which ones you're currently throttled for using
 this command.
 
-#### !tld [&lt;tld&gt;] -- display tld information
-
-```
-17:05 <jschauma> !tld de
-17:05 <jbot> Organization: DENIC eG
-17:05 <jbot> Contact     : vorstand@denic.de
-17:05 <jbot> Whois       : whois.denic.de
-17:05 <jbot> Status      : ACTIVE
-17:05 <jbot> Created     : 1986-11-05
-17:05 <jbot> URL         : http://www.denic.de/
-```
-
 #### !time [location] -- show the current time (in the given location)
 
 ```
