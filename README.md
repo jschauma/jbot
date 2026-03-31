@@ -625,4 +625,4 @@ install -c -m 755 jbot /somewhere/in/your/path/jbot
 ### Questions/comments:
 jschauma@netmeister.org
 
-https://twitter.com/jschauma
+https://mstdn.social/@jschauma
